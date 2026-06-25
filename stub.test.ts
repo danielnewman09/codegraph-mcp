@@ -53,6 +53,7 @@ flags.set("codegraph-python", "/Users/danielnewman/dev/.venv/bin/python");
 const explore = tools.get("codegraph_explore")!;
 const query = tools.get("codegraph_query")!;
 const setup = tools.get("codegraph_setup")!;
+const tests = tools.get("codegraph_tests")!;
 
 async function run(label: string, fn: () => Promise<any>, ms = 30_000) {
   log(`→ ${label} @ ${elapsed()}`);
@@ -97,6 +98,16 @@ try {
 
   const t7 = await run("setup db_status", () => setup.execute("t7", { action: "db_status", project_dir: tmp }));
   console.log("\n=== setup db_status (first 600) ===\n" + t7.slice(0, 600));
+
+  // ── tests tool ──
+  const t8 = await run("tests list", () => tests.execute("t8", { action: "list", source: "samplepkg" }));
+  console.log("\n=== tests list (first 400) ===\n" + t8.slice(0, 400));
+
+  const t9 = await run("tests covered_by", () => tests.execute("t9", { action: "covered_by", qualified_name: "backend.Evaluator" }));
+  console.log("\n=== tests covered_by backend.Evaluator (first 400) ===\n" + t9.slice(0, 400));
+
+  const t10 = await run("tests detail", () => tests.execute("t10", { action: "detail", qualified_name: "test_calculator.test_evaluator_step" }));
+  console.log("\n=== tests detail (first 500) ===\n" + t10.slice(0, 500));
 
   log("ALL OK @", elapsed());
 } catch (e) {

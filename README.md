@@ -17,8 +17,9 @@ Neo4j.
 
 ## Tools
 
-The extension exposes **three** tools. `codegraph_query` and `codegraph_explore`
-are read-only retrieval; `codegraph_setup` bootstraps and operates the graph.
+The extension exposes **four** tools. `codegraph_query`, `codegraph_explore`, and
+`codegraph_tests` are read-only retrieval; `codegraph_setup` bootstraps and
+operates the graph.
 
 ### `codegraph_setup` — bootstrap & operate
 
@@ -88,6 +89,26 @@ to *find* symbols before fetching full context. One `action` discriminator:
 Typical workflow: `explore` → `search` to find a symbol → `query` →
 `neighborhood` to fetch its full formatted context → `query` → `cached` +
 `json`/`plantuml` to re-view it another way → `query` → `html` to *see* it.
+
+### `codegraph_tests`
+
+Test-focused exploration returning slim JSON. Tests (from `test_paths`) are
+indexed as `test` / `test_step` / `test_fixture` / `assertion` nodes linked to
+the code under test by `VERIFIES` (test → method/class) and `CALLEE` (test_step
+→ called code). One `action` discriminator:
+
+| action | requires | returns |
+|---|---|---|
+| `list` | `source`/`test_module`/`tag`/`limit` optional | all tests + the code each verifies |
+| `modules` | filters optional | tests grouped by test module |
+| `verifies` | `qualified_name` (a test) | the code nodes a test exercises |
+| `covered_by` | `qualified_name` (a code node) | tests that verify it — **including tests of a class's members** (a coverage view) |
+| `detail` | `qualified_name` (a test) | the test's verifies targets + steps (with callees) + fixtures + assertions |
+
+For a *visual* graph of a test's neighborhood, use `codegraph_query` with
+`scope: neighborhood` and the test's `qualified_name`. `covered_by` is the
+headline query — "which tests cover this class/method?" — and its member
+expansion surfaces tests of every method on a class.
 
 ## Slash command
 
@@ -181,13 +202,75 @@ env > `/codegraph python <path>` persisted config (`~/.pi/agent/codegraph-mcp/co
 | `--codegraph-python-base` | `CODEGRAPH_PYTHON_BASE` | `python3` | base interpreter for `bootstrap_env` |
 | `--codegraph-source` | `CODEGRAPH_SOURCE` | `codegraph` | pip spec / path for codegraph |
 | `--doxygen-index-source` | `DOXYGEN_INDEX_SOURCE` | `doxygen-index` | pip spec / path for doxygen-index |
+| `--codegraph-steer-reads` | — | `false` | opt-in: block the first source-code `read` of each distinct path until a `codegraph_*` tool is used (enforcement layer; see Steering below) |
+
+## Steering the agent toward the graph tools
+
+The tools are only useful if the agent actually reaches for them. There are
+**two complementary layers**, from gentle to forceful:
+
+### 1. Guidance — `AGENTS.md` (recommended, always-on)
+
+Pi auto-discovers `AGENTS.md` (and `CLAUDE.md`) from the working directory and
+parents and folds it into the system prompt. Drop this in the repo root of any
+**indexed** project so the agent prefers the graph tools for structural /
+relational questions:
+
+```markdown
+# AGENTS.md
+
+## Codebase exploration
+
+This repository is indexed in a codegraph knowledge graph (Neo4j). The
+`codegraph_query`, `codegraph_explore`, and `codegraph_tests` tools retrieve structured graph
+context (classes, members, call graphs, inheritance, namespaces, tests) that is far
+richer than grepping source.
+
+- For **structure / relationships / call graphs / inheritance / "who calls X"**:
+  call `codegraph_explore` (action: search / compound / member / callers_callees
+  / inheritance) and `codegraph_query` (scope: neighborhood, format: markdown)
+  *before* reading source files.
+- For **tests / coverage / "which tests cover this code?"**: call `codegraph_tests`
+  (action: covered_by for a class/method, verifies/detail for a test, list/modules
+  to browse). Use it before grepping `tests/`.
+- Use `read`/`grep` for **exact file contents / text-level detail** after you
+  have the graph context, not as the first move for understanding architecture.
+- `codegraph_query` with `format: html` renders an interactive neighborhood
+  graph — handy when a visual is clearer than prose.
+- The `as-built` provenance tag holds the indexed source; `dependency` /
+  `design` / `scaffold` may be empty.
+```
+
+This is the light-touch default: it nudges every turn without breaking reads.
+
+### 2. Enforcement — `--codegraph-steer-reads` (opt-in, hard)
+
+For agents that ignore prose guidance, the extension can **block** the first
+source-code `read` of each distinct path until a `codegraph_*` tool has been
+called, returning a steering reason the model must respond to:
+
+```bash
+pi --codegraph-steer-reads true     # extension boolean flags take a value
+```
+
+Safeguards (verified): a given file path is blocked **at most once** per
+session, steering stops entirely once any `codegraph_*` tool is used, and a
+hard cap of 8 blocks per session bounds it — so it can never infinite-loop. Only
+reads of source-like paths (code extensions or `src/`/`lib/`/`app/`/… segments)
+are affected; reads of `README.md`, `package.json`, configs, etc. always pass.
+
+This is the "pre-execution hook on file reads" pattern: Pi's `tool_call` event
+fires *before* execution and can return `{block: true, reason}` (and mutate
+`event.input`), so the extension intercepts the read and redirects the agent.
+Use it when you want guaranteed steering; leave it off and rely on `AGENTS.md`
+otherwise.
 | — | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | localhost defaults | Neo4j connection |
 
 ## Architecture
 
 ```
 Pi session  ──►  index.ts (TS extension)
-                  │  registers 3 tools (query / explore / setup) + /codegraph + flags
+                  │  registers 4 tools (query / explore / tests / setup) + /codegraph + flags
                   │  bootstrap_env (TS-side): creates venv, pip-installs codegraph + doxygen-index
                   │  spawns & keeps alive:
                   ▼

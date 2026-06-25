@@ -259,6 +259,11 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
     type: "string",
     default: process.env.DOXYGEN_INDEX_SOURCE || "doxygen-index",
   });
+  pi.registerFlag("codegraph-steer-reads", {
+    description: "Opt-in steering: block the first source-code `read` of each distinct path until a codegraph_* tool has been used, returning a steering reason. Session-scoped: each path is blocked at most once, steering stops once any codegraph tool is used, hard cap of 8 blocks/session (no infinite loops). off by default.",
+    type: "boolean",
+    default: false,
+  });
 
   let bridge: CodegraphBridge | null = null;
 
@@ -406,12 +411,61 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
     const prev = bridge;
     bridge = new CodegraphBridge(resolvePython(), resolveBridgePath());
     void prev?.stop().catch(() => {});
+    // Reset read-steering state so a new session gets fresh steering.
+    steerUsedCodegraph = false;
+    steerBlockedPaths.clear();
+    steerBlockCount = 0;
   });
 
   pi.on("session_shutdown", () => {
     const b = bridge;
     bridge = null;
     void b?.stop().catch(() => {});
+  });
+
+  // ── Opt-in read steering (the "force graph tools first" wrinkle) ───────────
+  // When --codegraph-steer-reads is on, block the *first* source-code `read` of
+  // each distinct path until a codegraph_* tool has been called, returning a
+  // steering reason the agent must respond to. Session-scoped state guards
+  // against loops: a given path is blocked at most once, steering stops once the
+  // agent uses any codegraph tool, and a hard cap bounds total blocks.
+  let steerUsedCodegraph = false;
+  const steerBlockedPaths = new Set<string>();
+  let steerBlockCount = 0;
+  const STEER_CAP = 8;
+  const SOURCE_EXT = /\.(py|ts|tsx|js|jsx|mjs|cjs|cpp|c|cc|h|hpp|hh|rs|go|java|kt|swift|rb|php|cs|scala|clj|ex|exs|erl|hs|ml|fs|vue|svelte|dart|lua|pl|pm|r|jl|zig|nim|v|cr)\b/i;
+  const SOURCE_SEG = /(^|[\\/])(src|lib|libs|app|internal|pkg|cmd|api|core|services|components|modules|packages)([\\/]|$)/;
+  const looksLikeSource = (p: string): boolean => SOURCE_EXT.test(p) || SOURCE_SEG.test(p);
+  const STEER_REASON =
+    "This repository is indexed in a codegraph knowledge graph (Neo4j). " +
+    "Before reading source files to understand structure, call graphs, or " +
+    "class/method relationships, first call codegraph_explore (action: search/compound/member/callers_callees/inheritance) " +
+    "and/or codegraph_query (scope: neighborhood, format: markdown) to retrieve graph context, " +
+    "then read files for implementation detail. Re-issue this read afterward. " +
+    "(Disable with --no-codegraph-steer-reads or `pi ... -o codegraph-steer-reads=false`.)";
+
+  pi.on("tool_call", (event) => {
+    // Observe codegraph tool usage (custom tools have free-form toolName).
+    if (typeof event.toolName === "string" && event.toolName.startsWith("codegraph_")) {
+      steerUsedCodegraph = true;
+      return;
+    }
+    // Only steer source-code reads, and only when the flag is on. The flag
+    // value may arrive as boolean true or the string "true"/"1" depending on CLI parsing.
+    const steerRaw = pi.getFlag("codegraph-steer-reads");
+    const steerOn = steerRaw === true || steerRaw === "true" || steerRaw === "1";
+    if (!steerOn) return;
+    if (event.toolName !== "read") return;
+    // Once the agent has used a codegraph tool, stop steering for the session.
+    if (steerUsedCodegraph) return;
+    const path = (event.input as { path?: string } | undefined)?.path;
+    if (typeof path !== "string" || !looksLikeSource(path)) return;
+    // Never block the same path twice, and bound total blocks per session.
+    if (steerBlockedPaths.has(path) || steerBlockCount >= STEER_CAP) return;
+    steerBlockedPaths.add(path);
+    steerBlockCount += 1;
+    process.stderr.write(`[codegraph-steer] blocked first source read of ${path} this session — steering to codegraph_* tools (${steerBlockCount}/${STEER_CAP})\n`);
+    return { block: true, reason: STEER_REASON };
   });
 
   // ── Tool 1: codegraph_query ─────────────────────────────────────────────
@@ -571,7 +625,62 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // ── Tool 3: codegraph_setup ─────────────────────────────────────────────
+  // ── Tool 3: codegraph_tests ─────────────────────────────────────────────
+  pi.registerTool({
+    name: "codegraph_tests",
+    label: "Codegraph Tests",
+    description:
+      "Test-focused exploration of the codegraph store, returning slim JSON. The store indexes tests (from `test_paths`) as `test` / `test_step` / `test_fixture` / `assertion` nodes linked to the code under test by `VERIFIES` (test → method/class) and `CALLEE` (test_step → called code). `action` selects the lookup: 'list' (all tests, filterable by source/module/tag, with the code each test verifies), 'modules' (tests grouped by test module), 'verifies' (given a test, the code it exercises), 'covered_by' (given a code node, the tests that verify it — including tests of a class's members, i.e. a coverage view), 'detail' (one test: its verifies targets, steps with callees, fixtures, assertions). For a visual graph of a test's neighborhood, use codegraph_query scope='neighborhood' with the test's qualified_name.",
+    promptSnippet: "Explore indexed tests: list tests, what a test verifies, what tests cover a given class/method, test detail (steps/fixtures/assertions)",
+    promptGuidelines: [
+      "Use action='list' (optionally with source/test_module) to see all indexed tests and how many code nodes each verifies.",
+      "Use action='covered_by' with a class or method qualified_name to answer 'which tests cover this code?' — it includes tests of a class's members.",
+      "Use action='verifies' with a test qualified_name to see exactly which code a test exercises; action='detail' for the full breakdown (steps, callees, fixtures, assertions).",
+      "These return compact JSON; for a rendered graph of a test's neighborhood use codegraph_query scope='neighborhood' with the test's qualified_name.",
+    ],
+    parameters: Type.Object({
+      action: StringEnum(
+        ["list", "detail", "verifies", "covered_by", "modules"] as const,
+        {
+          description:
+            "list (optional source/test_module/tag filter): all tests + verifies counts. modules: tests grouped by test_module. " +
+            "verifies (needs qualified_name of a test): code it exercises. covered_by (needs qualified_name of a code node): tests that verify it (+ member tests). " +
+            "detail (needs qualified_name of a test): verifies + steps(with callees) + fixtures + assertions.",
+        },
+      ),
+      qualified_name: Type.Optional(Type.String({
+        description: "Test qualified_name (for action=verifies/detail) or code-node qualified_name (for action=covered_by).",
+      })),
+      source: Type.Optional(Type.String({
+        description: "Filter by source project (action=list/modules).",
+      })),
+      test_module: Type.Optional(Type.String({
+        description: "Filter by test module, e.g. 'test_calculator' (action=list/modules).",
+      })),
+      tag: Type.Optional(Type.String({
+        description: "Filter by provenance tag (action=list/modules).",
+      })),
+      limit: Type.Optional(Type.Number({
+        description: "Maximum tests to return for action=list (default 100).",
+      })),
+    }),
+    async execute(_id, params, signal) {
+      try {
+        const b = await ensureBridge();
+        if (signal?.aborted) return err("codegraph_tests aborted before dispatch");
+        const res = await b.call("tests", params as Record<string, unknown>);
+        if (!res.ok) return err(`codegraph error: ${res.error}`, { error: res.error });
+        const r = res.result;
+        const text = typeof r === "string" ? r : JSON.stringify(r, null, 2);
+        return ok(text, { action: params.action });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return err(`codegraph_tests failed: ${msg}`, { error: msg });
+      }
+    },
+  });
+
+  // ── Tool 4: codegraph_setup ─────────────────────────────────────────────
   pi.registerTool({
     name: "codegraph_setup",
     label: "Codegraph Setup",
@@ -581,15 +690,17 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
       "Docker container, and index source code into the graph. Use the `action` field to steer: " +
       "'bootstrap_env' (create/refresh a venv with codegraph + doxygen-index installed — run this first on a new machine), " +
       "'init_config' (auto-detect language/inputs/tests and write `.doxygen-index.toml`), 'index' (parse the project and " +
-      "ingest into Neo4j or JSON), 'db_start'/'db_stop'/'db_restart'/'db_status' (manage the Neo4j Docker container), " +
-      "'bootstrap' (one-shot: init_config → db_start → index), or 'status' (bridge + Neo4j + Docker + tags health).",
+      "ingest into Neo4j or JSON; clear defaults to false so it won't wipe existing data — pass clear=true to replace a source), " +
+      "'db_start'/'db_stop'/'db_restart'/'db_status' (manage the Neo4j Docker container), " +
+      "'bootstrap' (one-shot: init_config → db_start → index, with clear=true), or 'status' (bridge + Neo4j + Docker + tags health).",
     promptSnippet: "Provision env, create .doxygen-index.toml, manage Neo4j Docker, and index a project into the codegraph",
     promptGuidelines: [
+      "DESTRUCTIVE: action='index' and action='bootstrap' re-index a project and can REPLACE existing graph data for that source. Only run them when the user EXPLICITLY asks to (re)index or bootstrap a project — never as a shortcut to 'explore' or 'set up the graph' when asked to read or understand code.",
       "On a fresh machine, call codegraph_setup action='bootstrap_env' once before anything else — it creates a venv with codegraph + doxygen-index.",
       "To graph a new project end-to-end: codegraph_setup action='bootstrap' with project_dir — it writes the config, starts Neo4j, and indexes.",
       "Use action='init_config' to generate/refresh `.doxygen-index.toml` from a repo (auto-detects C++ vs Python, input/test paths, project name).",
       "Use action='db_start' before action='index' with format='neo4j'; action='db_status' checks the container.",
-      "After indexing, switch to codegraph_query / codegraph_explore to retrieve the graph context you just created.",
+      "After indexing, switch to codegraph_query / codegraph_explore / codegraph_tests to retrieve the graph context you just created.",
     ],
     parameters: Type.Object({
       action: StringEnum(
@@ -619,7 +730,7 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
         description: "init_config: overwrite an existing .doxygen-index.toml (default false — returns the existing one instead).",
       })),
       clear: Type.Optional(Type.Boolean({
-        description: "index: clear existing data for this source before ingesting into Neo4j (default true).",
+        description: "index: clear existing data for this source before ingesting into Neo4j (default false — won't wipe existing data; pass true to replace a source).",
       })),
       source: Type.Optional(Type.String({ description: "index: source provenance label (default: project name from config)." })),
       output_dir: Type.Optional(Type.String({ description: "index: override output directory." })),

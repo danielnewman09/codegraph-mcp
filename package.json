@@ -1,0 +1,46 @@
+{
+  "name": "codegraph-mcp",
+  "version": "0.1.0",
+  "description": "Pi extension wrapping the codegraph + doxygen-index libraries — a portable single package that bootstraps its own Python env, generates project config, manages a project-local Neo4j Docker container, indexes source into the graph, and retrieves rich knowledge-graph context via a narrow 3-tool surface (with interactive HTML neighborhood visualization).",
+  "type": "module",
+  "license": "MIT",
+  "author": "Daniel Newman",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "codegraph",
+    "neo4j",
+    "knowledge-graph",
+    "codebase-context",
+    "retrieval"
+  ],
+  "main": "index.ts",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "files": [
+    "index.ts",
+    "bridge",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "bridge:check": "python3 -c \"import ast; ast.parse(open('bridge/codegraph_bridge.py').read()); print('bridge syntax OK')\""
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "^0.74.0",
+    "typebox": "^1.1.24"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.74.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "@types/node": "^20.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.0.0"
+  }
+}

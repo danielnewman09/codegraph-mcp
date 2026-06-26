@@ -151,7 +151,7 @@ def handle_ping() -> dict:
         from codegraph.tools import CodeGraphDispatcher  # noqa: F401
 
         version = getattr(codegraph, "__version__", "unknown")
-        return {"ok": True, "version": version, "methods": ["ping", "query", "explore", "tests", "setup"]}
+        return {"ok": True, "version": version, "methods": ["ping", "query", "explore", "tests", "stats", "setup"]}
     except Exception as exc:  # codegraph not importable
         return {"ok": False, "error": f"codegraph import failed: {exc}"}
 
@@ -239,7 +239,7 @@ def handle_tests(params: dict):
     if action in ("detail", "verifies", "covered_by") and not qn:
         raise ValueError(f"action={action!r} requires 'qualified_name'")
 
-    from codegraph.connection import get_session
+    from codegraph.persistence.connection import get_session
 
     with get_session() as s:
         if action == "list":
@@ -282,6 +282,7 @@ def handle_tests(params: dict):
             return rows[0]
 
         if action == "covered_by":
+            detail = params.get("detail") in (True, "true", "True", 1, "1")
             # Direct VERIFIES edges + tests verifying COMPOSES members (e.g. a
             # class's methods), so asking about a class surfaces its method tests.
             q = (
@@ -299,13 +300,69 @@ def handle_tests(params: dict):
                 raise ValueError(f"no code node found with qualified_name={qn!r}")
             r = rows[0]
             r["covered_by"] = (r.get("direct") or []) + (r.get("member_tests") or [])
+
+            if detail:
+                # Batch-fetch descriptions + counts for all covering tests
+                all_qnames = [t["test"] for t in r["covered_by"] if t.get("test")]
+                if all_qnames:
+                    detail_rows = s.run(
+                        "MATCH (t) WHERE t.kind = 'test' AND t.qualified_name IN $qnames "
+                        "OPTIONAL MATCH (t)-[:COMPOSES]->(s) WHERE s.kind = 'test_step' "
+                        "OPTIONAL MATCH (t)-[:COMPOSES]->(f) WHERE f.kind = 'test_fixture' "
+                        "OPTIONAL MATCH (t)-[:COMPOSES]->(a) WHERE a.kind = 'assertion' "
+                        "RETURN t.qualified_name AS qn, t.description AS description, "
+                        "count(DISTINCT s) AS steps, count(DISTINCT f) AS fixtures, "
+                        "count(DISTINCT a) AS assertions",
+                        {"qnames": all_qnames},
+                    ).data()
+                    details_map = {d["qn"]: d for d in detail_rows}
+                    for entry in r["covered_by"]:
+                        d = details_map.get(entry["test"])
+                        if d:
+                            entry["description"] = d["description"]
+                            entry["steps"] = d["steps"]
+                            entry["fixtures"] = d["fixtures"]
+                            entry["assertions"] = d["assertions"]
             return r
+
+        if action == "uncovered":
+            # Negative-coverage query: classes/interfaces/enums/unions/structs
+            # with zero VERIFIES edges from any test.  Accepts a namespace
+            # prefix via qualified_name or a source filter.
+            prefix = params.get("qualified_name")
+            source_filter = params.get("source")
+            clauses = ["c.kind IN ['class', 'interface', 'enum', 'union', 'struct']"]
+            binds = {}
+            if prefix:
+                clauses.append("c.qualified_name STARTS WITH $prefix")
+                binds["prefix"] = prefix
+            if source_filter:
+                clauses.append("c.source = $source")
+                binds["source"] = source_filter
+            where = " AND ".join(clauses)
+            q = (
+                f"MATCH (c) WHERE {where} "
+                "OPTIONAL MATCH (t)-[:VERIFIES]->(c) WHERE t.kind = 'test' "
+                "WITH c, count(DISTINCT t) AS test_count "
+                "WHERE test_count = 0 "
+                "RETURN c.qualified_name AS qualified_name, c.kind AS kind, "
+                "c.source AS source "
+                "ORDER BY c.kind, c.qualified_name "
+                "LIMIT $limit"
+            )
+            binds["limit"] = limit
+            rows = s.run(q, binds).data()
+            return {
+                "uncovered": rows, "count": len(rows),
+                "filters": {"prefix": prefix, "source": source_filter},
+            }
 
         if action == "detail":
             base = (
                 "MATCH (t) WHERE t.kind = 'test' AND t.qualified_name = $qn "
                 "RETURN t.qualified_name AS qualified_name, t.test_name AS test_name, "
-                "t.test_module AS test_module, t.source AS source, t.tags AS tags, t.name AS name"
+                "t.test_module AS test_module, t.source AS source, t.tags AS tags, t.name AS name, "
+                "t.description AS description, t.llm_enriched AS llm_enriched"
             )
             info = s.run(base, {"qn": qn}).data()
             if not info:
@@ -335,7 +392,7 @@ def handle_tests(params: dict):
             }
 
     raise ValueError(
-        f"Unknown tests action {action!r}. Valid: {sorted(('list', 'detail', 'verifies', 'covered_by', 'modules'))}"
+        f"Unknown tests action {action!r}. Valid: {sorted(('list', 'detail', 'verifies', 'covered_by', 'modules', 'uncovered'))}"
     )
 
 
@@ -469,6 +526,71 @@ def _render_doxygen_toml(cfg: dict, html: bool) -> str:
     return "\n".join(lines) + "\n"
 
 
+# ── Stats: compact summary to avoid blowing context windows ────────────
+
+
+def handle_stats():
+    """Return compact high-level statistics — node/rel counts, description
+    coverage, test summary — so agents can troubleshoot without pulling
+    thousands of nodes (as ``scope=kind, kind=test`` would)."""
+    from codegraph.persistence.connection import get_session
+
+    with get_session() as s:
+        total = s.run("MATCH (n) RETURN count(n) AS total").data()[0]["total"]
+
+        by_kind = s.run(
+            "MATCH (n) RETURN n.kind AS kind, count(n) AS count ORDER BY count DESC"
+        ).data()
+
+        by_source = s.run(
+            "MATCH (n) WHERE n.source IS NOT NULL "
+            "RETURN n.source AS source, count(n) AS count ORDER BY count DESC"
+        ).data()
+
+        tags_data = s.run(
+            "MATCH (n) WHERE n.tags IS NOT NULL UNWIND n.tags AS tag "
+            "RETURN tag, count(n) AS count ORDER BY count DESC"
+        ).data()
+
+        prop = s.run(
+            "MATCH (n) "
+            "WHERE n.kind IN ['class','method','function','test','test_step','test_fixture','assertion'] "
+            "RETURN n.kind AS kind, count(n) AS total, "
+            "count(CASE WHEN n.description IS NOT NULL AND n.description <> '' THEN 1 END) AS with_description, "
+            "count(CASE WHEN n.llm_enriched IS NOT NULL AND n.llm_enriched THEN 1 END) AS llm_enriched "
+            "ORDER BY kind"
+        ).data()
+
+        rels = s.run(
+            "MATCH ()-[r]->() RETURN type(r) AS rel_type, count(r) AS count ORDER BY count DESC LIMIT 20"
+        ).data()
+        total_rels = sum(r["count"] for r in rels)
+
+        test_summary = s.run(
+            "MATCH (t) WHERE t.kind = 'test' "
+            "OPTIONAL MATCH (t)-[:COMPOSES]->(step) WHERE step.kind = 'test_step' "
+            "OPTIONAL MATCH (t)-[:VERIFIES]->(code) "
+            "RETURN count(DISTINCT t) AS test_count, "
+            "count(DISTINCT step) AS step_count, "
+            "count(DISTINCT code) AS verifies_count, "
+            "count(DISTINCT CASE WHEN t.description IS NOT NULL AND t.description <> '' THEN t END) AS described_tests"
+        ).data()[0]
+
+        return {
+            "total_nodes": total,
+            "total_relationships": total_rels,
+            "by_kind": by_kind,
+            "by_source": by_source,
+            "by_tag": tags_data,
+            "property_coverage": prop,
+            "relationships": rels,
+            "test_summary": test_summary,
+        }
+
+
+# ── Setup ─────────────────────────────────────────────────────────────────
+
+
 def handle_setup(params: dict):
     action = params.get("action")
     project_dir = params.get("project_dir") or os.getcwd()
@@ -542,7 +664,7 @@ def handle_setup(params: dict):
         except Exception as e:
             out["codegraph_version"] = f"import error: {e}"
         try:
-            from codegraph.connection import verify_connectivity
+            from codegraph.persistence.connection import verify_connectivity
             out["neo4j_reachable"] = bool(verify_connectivity())
         except Exception as e:
             out["neo4j_reachable"] = False
@@ -626,6 +748,8 @@ def main() -> None:
                 result = handle_explore(params)
             elif method == "tests":
                 result = handle_tests(params)
+            elif method == "stats":
+                result = handle_stats()
             elif method == "setup":
                 result = handle_setup(params)
             elif method == "shutdown":

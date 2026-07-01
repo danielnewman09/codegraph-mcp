@@ -176,6 +176,18 @@ def handle_query(params: dict):
         path = _render_html(graph, title, out, size=size)
         return {"html_path": path, "title": title, "scope": scope, "size": size}
 
+    if fmt == "component_plantuml":
+        graph = _build_graph(disp, scope, params)
+        disp.current_graph = graph
+        from codegraph.export.component_decomposition import (
+            ComponentDecomposition, export_component_plantuml,
+        )
+        detail = params.get("detail_level", "high")
+        min_size = int(params.get("min_component_size", 2))
+        dec = ComponentDecomposition(graph, min_component_size=min_size)
+        dec.decompose()
+        return export_component_plantuml(graph, decomposition=dec, detail_level=detail)
+
     # text formats — reuse the dispatcher's existing fetch/export handlers
     tool_name, keys = _SCOPE_TO_TOOL[scope]
     return disp.dispatch(tool_name, _pick(params, keys))
@@ -187,6 +199,7 @@ _ACTION_TO_TOOL = {
     "compound": ("get_compound", ("qualified_name",)),
     "member": ("get_member", ("qualified_name",)),
     "namespace": ("browse_namespace", ("namespace", "limit")),
+    "namespaces": ("list_namespaces", ()),
     "sources": ("list_sources", ()),
     "tags": ("graph_list_tags", ()),
     "inheritance": ("find_inheritance", ("qualified_name",)),

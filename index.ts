@@ -480,10 +480,11 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
       "indexed project, 'kind' to list all nodes of a kind (e.g. all classes), or 'cached' to re-export the last " +
       "fetched graph in a different format without re-querying. " +
       "`format` selects markdown (default, human-readable public API + relationships), plantuml (class diagram), " +
+      "component_plantuml (high-level component diagram with requirement annotations), " +
       "json (raw serialized graph), or html (interactive Cytoscape.js visualisation of the neighborhood, opened " +
       "in the browser). Results are cached server-side, so follow an expensive fetch with scope='cached' to switch " +
       "formats for free.",
-    promptSnippet: "Fetch codegraph context (by tag/namespace/compound/neighborhood/source/kind) as markdown, plantuml, json, or interactive HTML",
+    promptSnippet: "Fetch codegraph context (by tag/namespace/compound/neighborhood/source/kind) as markdown, plantuml, component_plantuml, json, or interactive HTML",
     promptGuidelines: [
       "Prefer codegraph_query to pull structured codebase context from the graph instead of grepping source.",
       "Start broad with scope='tag' to load an entire view, then scope='neighborhood' + a qualified_name to drill into one symbol.",
@@ -502,9 +503,9 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
         },
       ),
       format: StringEnum(
-        ["markdown", "plantuml", "json", "html"] as const,
+        ["markdown", "plantuml", "component_plantuml", "json", "html"] as const,
         {
-          description: "Output format. 'markdown' (default): human-readable public API + relationships. 'plantuml': class diagram. 'json': raw serialized graph. 'html': interactive Cytoscape visualisation opened in the browser.",
+          description: "Output format. 'markdown' (default): human-readable public API + relationships. 'plantuml': class diagram. 'component_plantuml': high-level component diagram with business-requirement annotations. 'json': raw serialized graph. 'html': interactive Cytoscape visualisation opened in the browser.",
         },
       ),
       qualified_name: Type.Optional(Type.String({
@@ -518,6 +519,12 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
       })),
       kind: Type.Optional(Type.String({
         description: "Node kind for scope=kind: 'class','struct','interface','enum','union','module','concept','method','attribute','enumvalue','function','define','namespace'.",
+      })),
+      detail_level: Type.Optional(StringEnum(["high", "medium"] as const, {
+        description: "component_plantuml only: 'high' shows component packages + requirement notes only; 'medium' also shows key class names inside packages (default 'high').",
+      })),
+      min_component_size: Type.Optional(Type.Number({
+        description: "component_plantuml only: minimum entities a namespace must contain to be treated as a component (default 2).",
       })),
       public_only: Type.Optional(Type.Boolean({
         description: "markdown only: show only public API members (default true). Set false to include private/protected members.",
@@ -582,18 +589,20 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
       "Use this to *find* symbols and inspect relationships before fetching full context with codegraph_query. " +
       "`action` selects the lookup: 'search' (find compounds by qualified-name substring), 'compound' (a class + its " +
       "member list), 'member' (a single method/attribute), 'namespace' (list compounds under a namespace prefix), " +
+      "'namespaces' (list all namespace nodes with entity counts — discover which namespaces are large enough to be components), " +
       "'sources' (list indexed source projects), 'tags' (list available provenance tags + node counts), " +
       "'inheritance' (parents + children of a compound), 'callers_callees' (what calls / is called by a member).",
-    promptSnippet: "Look up codegraph symbols & relationships (search, compound, member, namespace, inheritance, callers/callees, tags, sources)",
+    promptSnippet: "Look up codegraph symbols & relationships (search, compound, member, namespace, namespaces, inheritance, callers/callees, tags, sources)",
     promptGuidelines: [
       "Use codegraph_explore action='search' to find relevant classes by name when you don't yet know the qualified name.",
       "Use action='tags' or 'sources' first to discover what views/projects are indexed before fetching.",
+      "Use action='namespaces' to list all namespaces with entity counts — find components without pulling the full graph.",
       "Use action='inheritance' / 'callers_callees' for relationship-specific lookups, then codegraph_query scope='neighborhood' for full context.",
       "These return compact JSON; follow up with codegraph_query to retrieve formatted, complete context for the symbols you found.",
     ],
     parameters: Type.Object({
       action: StringEnum(
-        ["search", "compound", "member", "namespace", "sources", "tags", "inheritance", "callers_callees"] as const,
+        ["search", "compound", "member", "namespace", "namespaces", "sources", "tags", "inheritance", "callers_callees"] as const,
         {
           description:
             "search (needs query): find compounds by name substring. compound/member/inheritance/callers_callees (need qualified_name). " +

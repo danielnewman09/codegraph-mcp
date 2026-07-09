@@ -151,9 +151,19 @@ def handle_ping() -> dict:
         from codegraph.tools import CodeGraphDispatcher  # noqa: F401
 
         version = getattr(codegraph, "__version__", "unknown")
-        return {"ok": True, "version": version, "methods": ["ping", "query", "explore", "tests", "stats", "setup"]}
+        return {"ok": True, "version": version, "methods": ["ping", "query", "explore", "tests", "stats", "setup", "discover", "decompose_run", "decompose_validate", "design_run", "decompose_prompt", "design_prompt", "debug_env"]}
     except Exception as exc:  # codegraph not importable
         return {"ok": False, "error": f"codegraph import failed: {exc}"}
+
+
+def handle_debug_env() -> dict:
+    """Debug endpoint — dump LLM config for troubleshooting."""
+    import os as _os
+    return {
+        "cwd": _os.getcwd(),
+        "llm_vars": {k: _os.environ.get(k) for k in sorted(_os.environ) if k.startswith("LLM_")},
+        "neo4j_vars": {k: _os.environ.get(k) for k in sorted(_os.environ) if k.startswith("NEO4J_")},
+    }
 
 
 def handle_query(params: dict):
@@ -204,6 +214,7 @@ _ACTION_TO_TOOL = {
     "tags": ("graph_list_tags", ()),
     "inheritance": ("find_inheritance", ("qualified_name",)),
     "callers_callees": ("find_callers_and_callees", ("qualified_name",)),
+    "hlr_subtree": ("get_hlr_subtree", ("refid",)),
 }
 
 
@@ -649,9 +660,35 @@ def handle_setup(params: dict):
     if action in ("db_start", "db_stop", "db_restart", "db_status"):
         cmd = action.split("_", 1)[1]
         timeout = float(params.get("timeout", 120))
-        res = _run_cli("codegraph.db_cli", [cmd, "--project-dir", pd],
+        res = _run_cli("codegraph.persistence.db_cli", [cmd, "--project-dir", pd],
                        cwd=pd, timeout=timeout)
         res["container_action"] = cmd
+        return res
+
+    if action == "db_backup":
+        mode = params.get("mode", "dump")
+        keep = params.get("keep")
+        timeout = float(params.get("timeout", 300))
+        args = ["backup", "--project-dir", pd, "--mode", mode]
+        if keep is not None:
+            args += ["--keep", str(int(keep))]
+        res = _run_cli("codegraph.persistence.db_cli", args, cwd=pd, timeout=timeout)
+        res["backup_mode"] = mode
+        return res
+
+    if action == "db_restore":
+        backup_file = params.get("backup_file", "")
+        timeout = float(params.get("timeout", 300))
+        args = ["restore", "--project-dir", pd]
+        if backup_file:
+            args.append(backup_file)
+        res = _run_cli("codegraph.persistence.db_cli", args, cwd=pd, timeout=timeout)
+        return res
+
+    if action == "db_backups":
+        timeout = float(params.get("timeout", 30))
+        args = ["backups", "--project-dir", pd]
+        res = _run_cli("codegraph.persistence.db_cli", args, cwd=pd, timeout=timeout)
         return res
 
     if action == "bootstrap":
@@ -683,7 +720,7 @@ def handle_setup(params: dict):
             out["neo4j_reachable"] = False
             out["neo4j_error"] = str(e)
         if params.get("project_dir"):
-            out["docker"] = _run_cli("codegraph.db_cli", ["status", "--project-dir", pd],
+            out["docker"] = _run_cli("codegraph.persistence.db_cli", ["status", "--project-dir", pd],
                                      cwd=pd, timeout=30)
         try:
             out["tags"] = json.loads(handle_explore({"action": "tags"}))
@@ -693,8 +730,293 @@ def handle_setup(params: dict):
 
     raise ValueError(
         f"Unknown setup action {action!r}. Valid: bootstrap_env, init_config, "
-        f"index, db_start, db_stop, db_restart, db_status, bootstrap, status"
+        f"index, db_start, db_stop, db_restart, db_status, db_backup, "
+        f"db_restore, db_backups, bootstrap, status"
     )
+
+
+# ── Discover: design discovery tools (requirements + context) ───────────
+
+_discovery_dispatcher = None
+
+
+def get_discovery_dispatcher():
+    """Lazily construct the DesignDiscoveryDispatcher."""
+    global _discovery_dispatcher
+    if _discovery_dispatcher is None:
+        from codegraph_design.tools.dispatcher import DesignDiscoveryDispatcher
+        _discovery_dispatcher = DesignDiscoveryDispatcher()
+    return _discovery_dispatcher
+
+
+_DISCOVERY_ACTIONS = {
+    "search_requirements": ("query", "scope", "limit"),
+    "get_hlr_dependencies": ("refid", "direction"),
+    "list_requirements": ("component_name", "tag"),
+    "get_requirement_traces": ("refid",),
+    "build_design_context": ("feature_description", "component_name"),
+    # Workflow tools (ported from scripts/)
+    "ingest_design": ("file_path", "tag"),
+    "generate_hlr_docs": ("output_dir",),
+    "generate_feedback_docs": ("output_dir",),
+    "evaluate_coverage": ("output_path",),
+    "verify_callee_granularity": (),
+}
+
+
+# ── Decompose / Design agent pipelines ────────────────────────────────────
+#
+# These bridge methods run full agent pipelines internally using llm_caller.
+# They are long-running (they involve LLM API calls) and should be given
+# generous timeouts on the TS side (300-600s).
+
+
+def _export_decomposition_markdown(hlr_title: str, description: str, component: str, nodes: list[dict], output_dir: str = "") -> str:
+    """Export a decomposition result to a markdown file using codegraph's
+    :class:`~codegraph.export.markdown.MarkdownExporter`.
+
+    Writes to ``<output_dir>/<slug>/requirements.md`` where slug is derived
+    from the HLR title.  Returns the absolute path to the written file.
+    """
+    from pathlib import Path
+
+    from codegraph.export.markdown import MarkdownExporter
+    from codegraph.graph import LayerGraph
+
+    # Ensure LLR / HLR types are registered in CodeGraphNode
+    try:
+        import codegraph_requirements  # noqa: F401
+    except ImportError:
+        pass
+
+    # Derive a short slug from the title
+    title_line = hlr_title.split("\n")[0].strip().rstrip(".")
+    stop_words = {"shall", "must", "will", "should", "provides", "provide",
+                  "exposes", "expose", "generates", "generate", "produces",
+                  "produce", "supports", "support", "renders", "render",
+                  "accepts", "accept", "returns", "return", "queries", "query"}
+    words = title_line.split()
+    if words and words[0].lower() in ("the", "a", "an"):
+        words = words[1:]
+    slug_words = []
+    for w in words:
+        if w.lower() in stop_words:
+            break
+        if any(ch in w for ch in ",;:"):
+            slug_words.append(w.rstrip(",;:"))
+            break
+        slug_words.append(w)
+    slug = "-".join(slug_words).lower() if slug_words else title_line[:48].lower().replace(" ", "-")
+    for ch in " \\:?*<>|\"'/—––—":
+        slug = slug.replace(ch, "-")
+    slug = slug.strip("-")
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    if len(slug) > 64:
+        slug = slug[:64].rstrip("-")
+
+    if output_dir:
+        dir_path = Path(output_dir) / slug
+    else:
+        dir_path = Path.cwd() / "codegraph" / "requirements" / slug
+    dir_path.mkdir(parents=True, exist_ok=True)
+
+    # ── Build a synthetic HLR node so the exporter has a root ──────────
+    hlr_name = " ".join(slug_words).title() if slug_words else title_line
+    hlr_uid = f"hlr::{slug}"
+    llr_nodes = [n for n in nodes if n.get("type") == "LLR"]
+
+    hlr_node = {
+        "type": "HLR",
+        "name": hlr_name,
+        "description": description.strip(),
+        "tags": ["design"],
+        "refid": hlr_uid,
+        "edges": [
+            {"relation_type": "COMPOSES", "target_uid": llr.get("refid", ""),
+             "target_type": "LLR"}
+            for llr in llr_nodes
+            if llr.get("refid")
+        ],
+    }
+
+    # ── Deserialize → LayerGraph → MarkdownExporter ────────────────────
+    all_nodes = [hlr_node] + list(nodes)
+    graph = LayerGraph.deserialize(all_nodes, create_missing=True)
+    md = MarkdownExporter(graph, fields="llm", public_only=False).export()
+
+    out_path = dir_path / "requirements.md"
+    out_path.write_text(md, encoding="utf-8")
+    return str(out_path)
+
+
+def handle_decompose_run(params: dict):
+    """Run the decompose_hlr agent on an HLR.
+
+    Accepts either:
+    - ``hlr_refid`` (string): load the HLR from Neo4j, decompose, and persist.
+    - ``description`` (string): decompose a raw description (no persistence).
+
+    Automatically exports the result to
+    ``codegraph/requirements/<hlr-slug>/requirements.md``.
+    """
+    hlr_refid = params.get("hlr_refid")
+    description = params.get("description")
+    component = params.get("component") or ""
+    model = params.get("model") or ""
+    output_dir = params.get("output_dir") or ""
+
+    if hlr_refid:
+        from codegraph_design.agents.decompose_hlr import decompose_and_persist_hlr
+        result = decompose_and_persist_hlr(
+            refid=hlr_refid,
+            model=model,
+            log_dir=params.get("log_dir") or "",
+        )
+        # Derive title from HLR name in Neo4j
+        from codegraph_requirements.models import HLR
+        hlr = HLR.nodes.get_or_none(refid=hlr_refid)
+        hlr_title = hlr.name if hlr else f"HLR-{hlr_refid[:8]}"
+        hlr_description = hlr.description if hlr else ""
+        # Re-derive component from graph
+        comp_nodes = hlr.component.all() if hlr else []
+        hlr_component = comp_nodes[0].name if comp_nodes else component
+        return result
+    elif description:
+        from codegraph_design.agents.decompose_hlr import decompose
+        result = decompose(
+            description=description,
+            component=component,
+            model=model,
+            prompt_log_file=params.get("prompt_log_file") or "",
+        )
+        # Auto-export markdown
+        hlr_title = description.split("\n")[0].strip()
+        md_path = _export_decomposition_markdown(
+            hlr_title=hlr_title,
+            description=description,
+            component=component,
+            nodes=list(result.nodes),
+            output_dir=output_dir,
+        )
+        dumped = result.model_dump()
+        dumped["_markdown_path"] = md_path
+        return dumped
+    else:
+        raise ValueError("decompose_run requires either 'hlr_refid' or 'description'")
+
+
+def handle_decompose_validate(params: dict) -> dict:
+    """Validate a decomposition's flat node list against the 8 hard rules.
+
+    Accepts ``nodes`` (list of dicts).  Returns validation results without
+    persisting anything.
+    """
+    nodes = params.get("nodes", [])
+    if not nodes:
+        return {"valid": False, "errors": ["No nodes provided"]}
+
+    from codegraph_design.agents.decompose_hlr import validate_decomposition
+    violations = validate_decomposition(list(nodes))
+    return {
+        "valid": len(violations) == 0,
+        "violations": [
+            {"rule": v.rule, "message": v.message, "context": v.context}
+            for v in violations
+        ],
+    }
+
+
+def handle_design_run(params: dict):
+    """Run the design_oo agent on an HLR (requires pre-existing LLRs).
+
+    Accepts ``hlr_refid`` (string, required).  Loads HLR + LLRs from Neo4j,
+    runs the design + verification tool loop, persists the result.
+    """
+    hlr_refid = params.get("hlr_refid")
+    if not hlr_refid:
+        raise ValueError("design_run requires 'hlr_refid'")
+
+    from codegraph_design.agents.design_oo import design_and_persist_hlr
+    return design_and_persist_hlr(
+        refid=hlr_refid,
+        log_dir=params.get("log_dir") or "",
+    )
+
+
+def handle_decompose_prompt(params: dict) -> dict:
+    """Return the decompose agent's system prompt and tool schema.
+
+    Useful for Pi subagent definitions.
+    """
+    from codegraph_design.agents.decompose_hlr import SYSTEM_PROMPT, TOOL_DEFINITION
+    return {
+        "system_prompt": SYSTEM_PROMPT,
+        "tool_definition": TOOL_DEFINITION,
+    }
+
+
+def handle_design_prompt(params: dict) -> dict:
+    """Return the design agent's system prompt, context sections, and tool schemas.
+
+    Accepts optional context parameters:
+    - ``component_namespace``: required namespace for this component.
+    - ``intercomponent_classes``: list of inter-component boundary class dicts.
+    - ``existing_classes``: list of existing design class dicts.
+
+    Returns the formatted system prompt plus the combined tool schemas
+    from both DesignToolDispatcher and VerificationDispatcher.
+    """
+    from codegraph_design.agents.design_oo_prompt import (
+        build_namespace_section, build_intercomponent_section,
+        build_existing_classes_section,
+    )
+    from codegraph_design.agents.design_oo import SYSTEM_PROMPT
+    from codegraph_design.tools.dispatcher import (
+        DesignToolDispatcher, VerificationDispatcher,
+    )
+
+    component_namespace = params.get("component_namespace") or ""
+    intercomponent_classes = params.get("intercomponent_classes") or []
+    existing_classes = params.get("existing_classes") or []
+
+    ns_section = build_namespace_section(component_namespace) if component_namespace else ""
+    inter_section = build_intercomponent_section(intercomponent_classes) if intercomponent_classes else ""
+    existing_section = build_existing_classes_section(existing_classes) if existing_classes else ""
+
+    system = SYSTEM_PROMPT.format(
+        specializations_section="",
+        namespace_section=ns_section,
+        as_built_section="",
+        existing_classes_section=existing_section,
+        intercomponent_section=inter_section,
+    )
+
+    # Build dispatchers to collect tool schemas
+    design_disp = DesignToolDispatcher()
+    verif_disp = VerificationDispatcher(design_dispatcher=design_disp)
+
+    return {
+        "system_prompt": system,
+        "tool_schemas": design_disp.all_tool_schemas + verif_disp.all_tool_schemas,
+    }
+
+
+def handle_discover(params: dict):
+    """Dispatch design discovery tools.
+
+    The ``action`` parameter selects the specific discovery tool.
+    Parameters are passed through to the underlying tool handler.
+    """
+    action = params.get("action")
+    if action not in _DISCOVERY_ACTIONS:
+        raise ValueError(
+            f"Unknown discover action {action!r}. Valid: {sorted(_DISCOVERY_ACTIONS)}"
+        )
+    disp = get_discovery_dispatcher()
+    keys = _DISCOVERY_ACTIONS[action]
+    tool_input = {k: params[k] for k in keys if k in params and params[k] is not None}
+    return disp.dispatch(action, tool_input)
 
 
 # ── Main loop ──────────────────────────────────────────────────────────────
@@ -712,10 +1034,19 @@ def _load_dotenv() -> None:
                     line = line.strip()
                     if not line or line.startswith("#") or "=" not in line:
                         continue
+                    # Strip inline comments (# after value)
+                    if "#" in line:
+                        eq_idx = line.index("=")
+                        comment_idx = line.index("#", eq_idx)
+                        if comment_idx > eq_idx:
+                            line = line[:comment_idx].rstrip()
                     key, _, val = line.partition("=")
                     key = key.strip()
                     val = val.strip().strip('"').strip("'")
                     if key and key not in os.environ:
+                        os.environ[key] = val
+                    elif key and key in os.environ and (key.startswith("LLM") or key == "ENRICH_LOG_DIR"):
+                        # .env is authoritative for LLM config — always override
                         os.environ[key] = val
             except Exception:
                 pass
@@ -765,6 +1096,20 @@ def main() -> None:
                 result = handle_stats()
             elif method == "setup":
                 result = handle_setup(params)
+            elif method == "discover":
+                result = handle_discover(params)
+            elif method == "decompose_run":
+                result = handle_decompose_run(params)
+            elif method == "decompose_validate":
+                result = handle_decompose_validate(params)
+            elif method == "design_run":
+                result = handle_design_run(params)
+            elif method == "decompose_prompt":
+                result = handle_decompose_prompt(params)
+            elif method == "design_prompt":
+                result = handle_design_prompt(params)
+            elif method == "debug_env":
+                result = handle_debug_env()
             elif method == "shutdown":
                 break
             else:

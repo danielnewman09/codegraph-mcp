@@ -592,21 +592,23 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
       "'namespaces' (list all namespace nodes with entity counts — discover which namespaces are large enough to be components), " +
       "'sources' (list indexed source projects), 'tags' (list available provenance tags + node counts), " +
       "'inheritance' (parents + children of a compound), 'callers_callees' (what calls / is called by a member).",
-    promptSnippet: "Look up codegraph symbols & relationships (search, compound, member, namespace, namespaces, inheritance, callers/callees, tags, sources)",
+    promptSnippet: "Look up codegraph symbols & relationships (search, compound, member, namespace, namespaces, inheritance, callers/callees, hlr_subtree, tags, sources)",
     promptGuidelines: [
       "Use codegraph_explore action='search' to find relevant classes by name when you don't yet know the qualified name.",
       "Use action='tags' or 'sources' first to discover what views/projects are indexed before fetching.",
       "Use action='namespaces' to list all namespaces with entity counts — find components without pulling the full graph.",
       "Use action='inheritance' / 'callers_callees' for relationship-specific lookups, then codegraph_query scope='neighborhood' for full context.",
+      "Use action='hlr_subtree' with an HLR refid to retrieve the complete requirements tree (HLR → LLRs → tests → scaffold nodes) before decomposing or designing.",
       "These return compact JSON; follow up with codegraph_query to retrieve formatted, complete context for the symbols you found.",
     ],
     parameters: Type.Object({
       action: StringEnum(
-        ["search", "compound", "member", "namespace", "namespaces", "sources", "tags", "inheritance", "callers_callees"] as const,
+        ["search", "compound", "member", "namespace", "namespaces", "sources", "tags", "inheritance", "callers_callees", "hlr_subtree"] as const,
         {
           description:
             "search (needs query): find compounds by name substring. compound/member/inheritance/callers_callees (need qualified_name). " +
-            "namespace (needs namespace): list compounds under a prefix. sources / tags: list indexed projects / provenance tags.",
+            "namespace (needs namespace): list compounds under a prefix. sources / tags: list indexed projects / provenance tags. " +
+            "hlr_subtree (needs refid): fetch the full requirements subtree (HLR→LLRs→tests→scaffolds).",
         },
       ),
       qualified_name: Type.Optional(Type.String({
@@ -629,6 +631,9 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
       })),
       limit: Type.Optional(Type.Number({
         description: "Maximum results for search/namespace (default 30 / 50).",
+      })),
+      refid: Type.Optional(Type.String({
+        description: "HLR refid for action=hlr_subtree.",
       })),
     }),
     async execute(_id, params, signal) {
@@ -754,11 +759,17 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
       "'init_config' (auto-detect language/inputs/tests and write `.doxygen-index.toml`), 'index' (parse the project and " +
       "ingest into Neo4j or JSON; clear defaults to false so it won't wipe existing data — pass clear=true to replace a source), " +
       "'db_start'/'db_stop'/'db_restart'/'db_status' (manage the Neo4j Docker container), " +
+      "'db_backup' (create a dump or tar backup — container is briefly stopped), " +
+      "'db_restore' (restore from a backup file — WARNING: destroys current data, safety backup created first), " +
+      "'db_backups' (list available backup files with size and timestamp), " +
       "'bootstrap' (one-shot: init_config → db_start → index, with clear=true), or 'status' (bridge + Neo4j + Docker + tags health).",
     promptSnippet: "Provision env, create .doxygen-index.toml, manage Neo4j Docker, and index a project into the codegraph",
     promptGuidelines: [
       "DESTRUCTIVE: action='index' and action='bootstrap' re-index a project and can REPLACE existing graph data for that source. Only run them when the user EXPLICITLY asks to (re)index or bootstrap a project — never as a shortcut to 'explore' or 'set up the graph' when asked to read or understand code.",
       "On a fresh machine, call codegraph_setup action='bootstrap_env' once before anything else — it creates a venv with codegraph + doxygen-index.",
+      "Use action='db_backup' to create a backup before risky operations like re-indexing with clear=true. Pass mode='tar' for speed or mode='dump' (default) for portability.",
+      "Use action='db_backups' to list available backup files before restoring.",
+      "DESTRUCTIVE: action='db_restore' replaces the entire database from a backup file. A safety backup is created automatically first. Only run when the user explicitly asks to restore.",
       "To graph a new project end-to-end: codegraph_setup action='bootstrap' with project_dir — it writes the config, starts Neo4j, and indexes.",
       "Use action='init_config' to generate/refresh `.doxygen-index.toml` from a repo (auto-detects C++ vs Python, input/test paths, project name).",
       "Use action='db_start' before action='index' with format='neo4j'; action='db_status' checks the container.",
@@ -766,7 +777,7 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
     ],
     parameters: Type.Object({
       action: StringEnum(
-        ["bootstrap_env", "init_config", "index", "db_start", "db_stop", "db_restart", "db_status", "bootstrap", "status"] as const,
+        ["bootstrap_env", "init_config", "index", "db_start", "db_stop", "db_restart", "db_status", "db_backup", "db_restore", "db_backups", "bootstrap", "status"] as const,
         { description: "Which setup operation to perform (see tool description)." },
       ),
       project_dir: Type.Optional(Type.String({
@@ -799,6 +810,15 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
       timeout: Type.Optional(Type.Number({
         description: "index/db_*: per-command timeout in seconds (default 600 for index, 120 for db).",
       })),
+      mode: Type.Optional(StringEnum(["dump", "tar"] as const, {
+        description: "db_backup only: backup mode. 'dump' (default): logical neo4j-admin dump producing a portable .dump file. 'tar': fast filesystem-level tar.gz of the data directory.",
+      })),
+      keep: Type.Optional(Type.Number({
+        description: "db_backup only: retention — keep only the last N backup files of the same mode, deleting older ones.",
+      })),
+      backup_file: Type.Optional(Type.String({
+        description: "db_restore only: path to the backup file to restore. If omitted, lists available backups instead of restoring.",
+      })),
       codegraph_source: Type.Optional(Type.String({
         description: "bootstrap_env: pip spec or local path for codegraph (default: flag --codegraph-source or 'codegraph').",
       })),
@@ -825,6 +845,185 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return err(`codegraph_setup failed: ${msg}`, { error: msg });
+      }
+    },
+  });
+
+  // ── Tool 5: codegraph_discover ───────────────────────────────────────
+  pi.registerTool({
+    name: "codegraph_discover",
+    label: "Codegraph Discover",
+    description:
+      "Discover existing requirements (HLRs/LLRs) and related code before designing a new feature. " +
+      "Actions: search_requirements (keyword search), get_hlr_dependencies (DEPENDS_ON traversal), " +
+      "list_requirements (browse by component/tag), get_requirement_traces (requirement → code links), " +
+      "build_design_context (assemble full context document for design agent). " +
+      "Use this BEFORE designing to understand what already exists.",
+    promptSnippet: "Discover existing requirements & code before designing (search_requirements, get_hlr_dependencies, list_requirements, get_requirement_traces, build_design_context)",
+    promptGuidelines: [
+      "Call codegraph_discover action='build_design_context' with a feature description to get a structured context document for design.",
+      "Use action='search_requirements' to find related HLRs/LLRs by keyword before designing a new feature.",
+      "Use action='get_hlr_dependencies' to find which HLRs a requirement depends on (DEPENDS_ON edges).",
+      "codegraph_discover complements codegraph_query and codegraph_explore: discover finds requirements, query/explore find code.",
+    ],
+    parameters: Type.Object({
+      action: StringEnum(
+        ["search_requirements", "get_hlr_dependencies", "list_requirements", "get_requirement_traces", "build_design_context", "ingest_design", "generate_hlr_docs", "generate_feedback_docs", "evaluate_coverage", "verify_callee_granularity"] as const,
+        {
+          description:
+            "search_requirements (needs query): keyword search across HLR/LLR descriptions. " +
+            "get_hlr_dependencies (needs refid): traverse DEPENDS_ON edges from an HLR. " +
+            "list_requirements (optional component_name/tag): browse all HLRs. " +
+            "get_requirement_traces (needs refid): requirement → design node COMPOSES edges. " +
+            "build_design_context (needs feature_description): assemble full context document. " +
+            "ingest_design (needs file_path): ingest a design/tests markdown file into Neo4j. " +
+            "generate_hlr_docs: generate per-HLR documents from Neo4j. " +
+            "generate_feedback_docs: generate feedback review documents. " +
+            "evaluate_coverage: evaluate test coverage and design smells. " +
+            "verify_callee_granularity: verify CALLEE edges target correct level.",
+        },
+      ),
+      query: Type.Optional(Type.String({
+        description: "Search text for action=search_requirements.",
+      })),
+      scope: Type.Optional(Type.String({
+        description: "Search scope for action=search_requirements: 'hlr', 'llr', or 'both' (default both).",
+      })),
+      limit: Type.Optional(Type.Number({
+        description: "Max results for action=search_requirements (default 20).",
+      })),
+      refid: Type.Optional(Type.String({
+        description: "HLR or LLR refid for action=get_hlr_dependencies or action=get_requirement_traces.",
+      })),
+      direction: Type.Optional(Type.String({
+        description: "Traversal direction for action=get_hlr_dependencies: 'outgoing', 'incoming', or 'both' (default outgoing).",
+      })),
+      component_name: Type.Optional(Type.String({
+        description: "Component name filter for action=list_requirements or action=build_design_context.",
+      })),
+      tag: Type.Optional(Type.String({
+        description: "Tag filter for action=list_requirements (e.g. 'design', 'as-built').",
+      })),
+      feature_description: Type.Optional(Type.String({
+        description: "Feature description for action=build_design_context.",
+      })),
+      file_path: Type.Optional(Type.String({
+        description: "Path to markdown file for action=ingest_design.",
+      })),
+      output_path: Type.Optional(Type.String({
+        description: "Output path for action=evaluate_coverage (JSON report).",
+      })),
+    }),
+    async execute(_id, params, signal) {
+      try {
+        const b = await ensureBridge();
+        if (signal?.aborted) return err("codegraph_discover aborted before dispatch");
+        const res = await b.call("discover", params as Record<string, unknown>);
+        if (!res.ok) return err(`codegraph_discover error: ${res.error}`, { error: res.error });
+        const r = res.result;
+        const text = typeof r === "string" ? r : JSON.stringify(r, null, 2);
+        return ok(text, { action: params.action });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return err(`codegraph_discover failed: ${msg}`, { error: msg });
+      }
+    },
+  });
+
+  // ── Tool 6: codegraph_decompose ─────────────────────────────────────────
+  pi.registerTool({
+    name: "codegraph_decompose",
+    label: "Codegraph Decompose",
+    description:
+      "Run the decompose_hlr agent to break down a high-level requirement (HLR) into low-level requirements (LLRs) " +
+      "with verification stubs. Accepts either a Neo4j HLR refid (loads from the graph, decomposes, persists) " +
+      "or a raw description string (decomposes only, no persistence). " +
+      "When an HLR refid is provided, the agent automatically loads the existing requirements tree " +
+      "(existing LLRs, tests, scaffold nodes) and completes gaps rather than starting from scratch — " +
+      "it fills in missing tests, assertions, and steps for partially complete requirements. " +
+      "Returns the flat list of codegraph node dicts (LLRs, TestNodes, AssertionNodes, TestStepNodes) " +
+      "or a summary of persisted results. This is a heavy, long-running tool (makes LLM API calls).",
+    promptSnippet: "Decompose an HLR into LLRs with verification stubs — fills in gaps for partially complete requirements",
+    promptGuidelines: [
+      "Use codegraph_decompose to decompose a high-level requirement into low-level requirements with test stubs.",
+      "Pass 'hlr_refid' to decompose an existing HLR from Neo4j; pass 'description' to decompose a raw description.",
+      "After decomposition, use codegraph_design to produce the OO class design.",
+      "This tool runs an LLM agent internally — it may take 30-120 seconds.",
+    ],
+    parameters: Type.Object({
+      hlr_refid: Type.Optional(Type.String({
+        description: "The HLR refid (hex UUID) to load from Neo4j, decompose, and persist.",
+      })),
+      description: Type.Optional(Type.String({
+        description: "Raw HLR description text for one-shot decomposition (no persistence).",
+      })),
+      component: Type.Optional(Type.String({
+        description: "Name of the architectural component this HLR belongs to (for description mode).",
+      })),
+      model: Type.Optional(Type.String({
+        description: "LLM model override (passed to llm_caller).",
+      })),
+      log_dir: Type.Optional(Type.String({
+        description: "Directory for per-step prompt logs.",
+      })),
+    }),
+    async execute(_id, params, signal) {
+      try {
+        const b = await ensureBridge();
+        if (signal?.aborted) return err("codegraph_decompose aborted before dispatch");
+        // Long timeout — LLM calls can be slow
+        const res = await b.call("decompose_run", params as Record<string, unknown>, 300_000);
+        if (!res.ok) return err(`codegraph_decompose error: ${res.error}`, { error: res.error });
+        const r = res.result;
+        const text = typeof r === "string" ? r : JSON.stringify(r, null, 2);
+        return ok(text, {});
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return err(`codegraph_decompose failed: ${msg}`, { error: msg });
+      }
+    },
+  });
+
+  // ── Tool 7: codegraph_design ────────────────────────────────────────────
+  pi.registerTool({
+    name: "codegraph_design",
+    label: "Codegraph Design",
+    description:
+      "Run the design_oo agent to produce an object-oriented class design and resolve notional verification " +
+      "stubs to qualified design names. Requires the HLR to already have LLRs (decompose it first). " +
+      "Loads HLR + LLRs from Neo4j, runs the design + verification tool loop (up to 75 turns), " +
+      "persists the design by updating scaffold nodes in place to preserve verification edges. " +
+      "Returns a summary of nodes created/updated, verifications resolved, and scaffold cleanup. " +
+      "This is a heavy, long-running tool (makes LLM API calls).",
+    promptSnippet: "Design OO class structure and resolve verification stubs for an HLR (design_run via codegraph bridge)",
+    promptGuidelines: [
+      "Use codegraph_design AFTER codegraph_decompose — the HLR must have LLRs with verification stubs.",
+      "Pass 'hlr_refid' to design an existing HLR from Neo4j.",
+      "After design, run codegraph_discover action='generate_hlr_docs' to export readable documents.",
+      "Then use codegraph_discover action='generate_feedback_docs' to create review templates.",
+      "This tool runs an LLM agent internally — it may take 60-300 seconds.",
+    ],
+    parameters: Type.Object({
+      hlr_refid: Type.Optional(Type.String({
+        description: "The HLR refid (hex UUID) to load from Neo4j, design, and persist.",
+      })),
+      log_dir: Type.Optional(Type.String({
+        description: "Directory for per-step prompt logs.",
+      })),
+    }),
+    async execute(_id, params, signal) {
+      try {
+        const b = await ensureBridge();
+        if (signal?.aborted) return err("codegraph_design aborted before dispatch");
+        // Long timeout — design tool loop can be very slow
+        const res = await b.call("design_run", params as Record<string, unknown>, 600_000);
+        if (!res.ok) return err(`codegraph_design error: ${res.error}`, { error: res.error });
+        const r = res.result;
+        const text = typeof r === "string" ? r : JSON.stringify(r, null, 2);
+        return ok(text, {});
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return err(`codegraph_design failed: ${msg}`, { error: msg });
       }
     },
   });

@@ -1,4 +1,4 @@
-# codegraph-mcp
+# codegraph
 
 A [Pi](https://github.com/nicobailon/pi) extension that bundles the
 [**codegraph**](../codegraph) and [**doxygen-index**](../doxygen-dependency-parser)
@@ -116,7 +116,7 @@ expansion surfaces tests of every method on a class.
 `/codegraph restart` — restart the Python sidecar
 `/codegraph bootstrap [codegraph-src] [doxygen-index-src]` — provision the venv (action='bootstrap_env')
 `/codegraph venv` — show the venv path + whether it exists
-`/codegraph python [path|--clear]` — with a path, **persist** the interpreter to `~/.pi/agent/codegraph-mcp/config.json` (one-time setup; no `export` needed afterwards). With `--clear`, remove it. No arg: show the resolved interpreter and where it came from.
+`/codegraph python [path|--clear]` — with a path, **persist** the interpreter to `~/.pi/agent/codegraph/config.json` (one-time setup; no `export` needed afterwards). With `--clear`, remove it. No arg: show the resolved interpreter and where it came from.
 `/codegraph bridge` — print the resolved bridge script path
 
 ## Install
@@ -138,7 +138,7 @@ expansion surfaces tests of every method on a class.
 venv and installs both libraries:
 
 ```bash
-pi install ./codegraph-mcp
+pi install ./codegraph
 # then inside Pi:
 #   call codegraph_setup with action='bootstrap_env'
 # or from the shell:
@@ -166,7 +166,7 @@ pi                       # start Pi in any folder
 #   /codegraph restart
 ```
 
-This writes `~/.pi/agent/codegraph-mcp/config.json` and is read on every launch
+This writes `~/.pi/agent/codegraph/config.json` and is read on every launch
 afterwards — no `export` needed. (You can also `export CODEGRAPH_PYTHON=...`
 per shell, or pass `--codegraph-python <path>` per launch; the persisted config
 sits between the env var and the bootstrapped venv in precedence.)
@@ -183,9 +183,9 @@ extra setup. Real environment variables always take precedence. Otherwise set
 ### Load into Pi
 
 ```bash
-pi install ./codegraph-mcp        # from this repo's parent dir
+pi install ./codegraph        # from this repo's parent dir
 # or load ad-hoc without installing:
-pi -e ./codegraph-mcp/index.ts
+pi -e ./codegraph/index.ts
 ```
 
 ## Configuration
@@ -194,10 +194,10 @@ pi -e ./codegraph-mcp/index.ts
 |---|---|---|---|
 | `--codegraph-python` | `CODEGRAPH_PYTHON` | persisted config, else bootstrapped venv python, else `python3` | interpreter for the bridge |
 | `--codegraph-bridge` | — | `<ext>/bridge/codegraph_bridge.py` | path to the sidecar script |
-| `--codegraph-venv` | — | `~/.pi/agent/codegraph-mcp/venv` | auto-provisioned venv path |
+| `--codegraph-venv` | — | `~/.pi/agent/codegraph/venv` | auto-provisioned venv path |
 
 **Python resolution precedence:** `--codegraph-python` flag > `$CODEGRAPH_PYTHON`
-env > `/codegraph python <path>` persisted config (`~/.pi/agent/codegraph-mcp/config.json`)
+env > `/codegraph python <path>` persisted config (`~/.pi/agent/codegraph/config.json`)
 > bootstrapped venv (`--codegraph-venv`) > `python3`.
 | `--codegraph-python-base` | `CODEGRAPH_PYTHON_BASE` | `python3` | base interpreter for `bootstrap_env` |
 | `--codegraph-source` | `CODEGRAPH_SOURCE` | `codegraph` | pip spec / path for codegraph |
@@ -297,7 +297,7 @@ venv python).
 
 The npm package ships `index.ts` + `bridge/`. It does **not** vendor Python
 or wheels — instead `codegraph_setup action='bootstrap_env'` provisions a
-self-contained venv at `~/.pi/agent/codegraph-mcp/venv` (overridable) and
+self-contained venv at `~/.pi/agent/codegraph/venv` (overridable) and
 installs `codegraph` + `doxygen-index` from PyPI or local paths. The bridge
 then runs inside that venv, so the extension is portable to any machine with
 Python 3.10+ (and Docker for the Neo4j container).

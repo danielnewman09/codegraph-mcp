@@ -1,5 +1,5 @@
 {
-  "name": "codegraph-mcp",
+  "name": "codegraph",
   "version": "0.1.0",
   "description": "Pi extension wrapping the codegraph + doxygen-index libraries — a portable single package that bootstraps its own Python env, generates project config, manages a project-local Neo4j Docker container, indexes source into the graph, and retrieves rich knowledge-graph context via a narrow 3-tool surface (with interactive HTML neighborhood visualization).",
   "type": "module",
@@ -22,6 +22,8 @@
   },
   "files": [
     "index.ts",
+    "shared.ts",
+    "tools",
     "bridge",
     "README.md",
     "LICENSE"
@@ -32,6 +34,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.74.0",
+    "@earendil-works/pi-tui": "^0.74.0",
     "typebox": "^1.1.24"
   },
   "peerDependencies": {

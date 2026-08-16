@@ -115,3 +115,14 @@ test("schemas are standards-compliant JSON Schema (deep-copy round-trips cleanly
     assert.deepEqual(again, s, `${t.name}: schema serialises cleanly`);
   }
 });
+
+test("setup index exposes SQLite as the default graph target", () => {
+  const schema = toolInputJsonSchema(findTool("codegraph_setup")!);
+  const formats = schema.properties?.format?.anyOf?.map((entry: { const?: string }) => entry.const)
+    ?? schema.properties?.format?.enum;
+  assert.ok(formats?.includes("sqlite"), "setup format must expose sqlite explicitly");
+  assert.match(
+    findTool("codegraph_setup")!.description,
+    /SQLite \(the default\)/,
+  );
+});

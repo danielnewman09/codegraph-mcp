@@ -174,10 +174,10 @@ def handle_setup(params: dict):
 
     if action == "index":
         _apply_backend(params)
-        # "neo4j" here means "ingest into the active graph backend" — which
-        # is SQLite by default (CODEGRAPH_BACKEND=sqlite) or Neo4j when
-        # selected.  "json" writes a JSON file (plus HTML when configured).
-        fmt = params.get("format", "neo4j")
+        # Database targets are explicit: SQLite is the default, while Neo4j
+        # is retained as a deprecated legacy backend. JSON writes a file.
+        backend = os.environ.get("CODEGRAPH_BACKEND", "sqlite")
+        fmt = params.get("format") or backend
         timeout = float(params.get("timeout", 600))
         args = ["project", pd, "--format", fmt]
         # Default clear=False so an inadvertent agent call can't wipe an
@@ -240,7 +240,7 @@ def handle_setup(params: dict):
         steps = []
         cfg_res = handle_setup({**params, "action": "init_config"})
         steps.append({"step": "init_config", "result": cfg_res})
-        fmt = params.get("format", "neo4j")
+        fmt = params.get("format") or backend
         if fmt == "neo4j" and backend == "neo4j":
             db_res = handle_setup({**params, "action": "db_start", "timeout": 120})
             steps.append({"step": "db_start", "result": db_res})
@@ -298,4 +298,3 @@ def handle_setup(params: dict):
         f"index, db_start, db_stop, db_restart, db_status, db_backup, "
         f"db_restore, db_backups, bootstrap, status"
     )
-

@@ -9,7 +9,8 @@ coding agent — plus an interactive HTML visualizer for the neighborhood of any
 code object.
 
 The graph backend is **SQLite by default** (a plain file — no Docker, no
-service to run) with **Neo4j/Docker as an opt-in** via `backend='neo4j'` or
+service to run). **Neo4j/Docker is a deprecated legacy backend**, available
+only when explicitly selected via `backend='neo4j'` or
 `CODEGRAPH_BACKEND=neo4j`.
 
 The design goal is a **narrow tool surface**: instead of exposing every
@@ -36,7 +37,7 @@ start with `bootstrap_env`; to graph a new project end-to-end, use `bootstrap`.
 |---|---|---|
 | `bootstrap_env` | — | create/refresh a venv with `codegraph` + `doxygen-index` installed, then restart the bridge under it. Run once per machine. Sources overridable via `codegraph_source` / `doxygen_index_source` (pass a path for an editable install). |
 | `init_config` | `project_dir` | auto-detect language (C++/Python), `input_paths`, `test_paths`, and project name (from `pyproject.toml` or dir name) and write `.doxygen-index.toml`. Override any field; `force` to overwrite. |
-| `index` | `project_dir` | run `doxygen-index` to parse the project and ingest into the active backend (`format: neo4j`, default — SQLite unless `backend='neo4j'`) or write JSON (`format: json`, also emits HTML when `[codegraph-html]` is configured). |
+| `index` | `project_dir` | run `doxygen-index` to parse the project and ingest into SQLite (`format: sqlite`, default), write JSON (`format: json`), or explicitly use the deprecated legacy Neo4j backend (`format: neo4j`). |
 | `db_start` / `db_stop` / `db_restart` / `db_status` | `project_dir` | **Neo4j backend only** — manage the project-local Neo4j Docker container (`neo4j-<project>`, data bind-mounted at `codegraph/neo4j/`) via the `codegraph-db` CLI. |
 | `bootstrap` | `project_dir` | one-shot pipeline: `init_config` → `index` (`db_start` only when `backend='neo4j'`). |
 | `status` | `project_dir?` | health overview: bridge ping, codegraph version, backend reachability (+ SQLite DB file info, or Docker state for Neo4j), available tags + node counts. |

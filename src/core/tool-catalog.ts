@@ -367,18 +367,18 @@ export const setupTool: CodegraphToolDefinition = {
     "project-local Neo4j Docker container). Use the `action` field to steer: " +
     "'bootstrap_env' (create/refresh a venv with codegraph + doxygen-index installed — run this first on a new machine), " +
     "'init_config' (auto-detect language/inputs/tests and write `.doxygen-index.toml`), 'index' (parse the project and " +
-    "ingest into the graph backend or JSON; clear defaults to false so it won't wipe existing data — pass clear=true to replace a source), " +
+    "ingest into SQLite (the default), the deprecated legacy Neo4j backend, or JSON; clear defaults to false so it won't wipe existing data — pass clear=true to replace a source), " +
     "'db_start'/'db_stop'/'db_restart'/'db_status' (Neo4j backend only: manage the Docker container), " +
     "'db_backup' (Neo4j backend only: create a dump or tar backup — container is briefly stopped), " +
     "'db_restore' (Neo4j backend only: restore from a backup file — WARNING: destroys current data, safety backup created first), " +
     "'db_backups' (list available backup files with size and timestamp), " +
-    "'bootstrap' (one-shot: init_config → index, with clear=true; db_start only when backend='neo4j'), or " +
+    "'bootstrap' (one-shot: init_config → index, with clear=true; db_start only for the deprecated backend='neo4j'), or " +
     "'status' (bridge + backend + tags health).",
   promptSnippet: "Provision env, create .doxygen-index.toml, and index a project into the codegraph (SQLite by default, Neo4j optional)",
   promptGuidelines: [
     "DESTRUCTIVE: action='index' and action='bootstrap' re-index a project and can REPLACE existing graph data for that source. Only run them when the user EXPLICITLY asks to (re)index or bootstrap a project — never as a shortcut to 'explore' or 'set up the graph' when asked to read or understand code.",
     "On a fresh machine, call codegraph_setup action='bootstrap_env' once before anything else — it creates a venv with codegraph + doxygen-index.",
-    "The default backend is SQLite (a plain file — no Docker, no container to manage). Only use the db_* actions and backend='neo4j' when the user explicitly wants the Neo4j/Docker flow.",
+    "The default backend is SQLite (a plain file — no Docker, no container to manage). Neo4j is a deprecated legacy backend; only use db_* actions and backend='neo4j' when explicitly requested.",
     "Use action='db_backup' (Neo4j backend only) to create a backup before risky operations like re-indexing with clear=true. Pass mode='tar' for speed or mode='dump' (default) for portability.",
     "Use action='db_backups' to list available backup files before restoring.",
     "DESTRUCTIVE: action='db_restore' replaces the entire database from a backup file. A safety backup is created automatically first. Only run when the user explicitly asks to restore.",
@@ -408,8 +408,8 @@ export const setupTool: CodegraphToolDefinition = {
     backend: Type.Optional(stringEnum(["sqlite", "neo4j"], {
       description: "index/bootstrap: override the graph backend for this run ('sqlite' default — plain file, no Docker; 'neo4j' — project-local Docker container).",
     })),
-    format: Type.Optional(stringEnum(["neo4j", "json"], {
-      description: "index: output format. 'neo4j' (default) ingests into the active graph backend (SQLite by default); 'json' writes a JSON file (and HTML if [codegraph-html] is configured).",
+    format: Type.Optional(stringEnum(["sqlite", "json", "neo4j"], {
+      description: "index: output target. 'sqlite' is the default; 'json' writes a JSON file; 'neo4j' selects the deprecated legacy Neo4j backend.",
     })),
     html: Type.Optional(Type.Boolean({
       description: "init_config: include a [codegraph-html] section so doxygen-index also emits an interactive HTML graph (default true).",

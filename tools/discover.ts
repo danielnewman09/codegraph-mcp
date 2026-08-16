@@ -34,9 +34,9 @@ export function registerDiscoverTool(
         {
           description:
             "search_requirements (needs query): keyword search across HLR/LLR descriptions. " +
-            "get_hlr_dependencies (needs refid): traverse DEPENDS_ON edges from an HLR. " +
+            "get_hlr_dependencies (needs uid): traverse DEPENDS_ON edges from an HLR. " +
             "list_requirements (optional component_name/tag): browse all HLRs. " +
-            "get_requirement_traces (needs refid): requirement → design node COMPOSES edges. " +
+            "get_requirement_traces (needs uid): requirement → design node COMPOSES edges. " +
             "build_design_context (needs feature_description): assemble full context document. " +
             "ingest_design (needs file_path): ingest a design/tests markdown file into Neo4j. " +
             "generate_hlr_docs: generate per-HLR documents from Neo4j. " +
@@ -54,8 +54,8 @@ export function registerDiscoverTool(
       limit: Type.Optional(Type.Number({
         description: "Max results for action=search_requirements (default 20).",
       })),
-      refid: Type.Optional(Type.String({
-        description: "HLR or LLR refid for action=get_hlr_dependencies or action=get_requirement_traces.",
+      uid: Type.Optional(Type.String({
+        description: "HLR or LLR uid for action=get_hlr_dependencies or action=get_requirement_traces.",
       })),
       direction: Type.Optional(Type.String({
         description: "Traversal direction for action=get_hlr_dependencies: 'outgoing', 'incoming', or 'both' (default outgoing).",
@@ -78,8 +78,8 @@ export function registerDiscoverTool(
     }),
     renderCall(args, _theme, context) {
       const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-      const p = args as { action?: string; query?: string; refid?: string; feature_description?: string };
-      const target = p.query ?? p.refid ?? p.feature_description?.slice(0, 50) ?? "";
+      const p = args as { action?: string; query?: string; uid?: string; feature_description?: string };
+      const target = p.query ?? p.uid ?? p.feature_description?.slice(0, 50) ?? "";
       text.setText(["codegraph_discover", p.action ?? "", target].filter(Boolean).join("  "));
       return text;
     },

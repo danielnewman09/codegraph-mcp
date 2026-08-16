@@ -188,10 +188,13 @@ def handle_design_run(params: dict):
     if not hlr_uid:
         raise ValueError("design_run requires 'hlr_uid'")
 
+    from pathlib import Path
+    default_log_dir = str(Path.cwd() / "codegraph" / "logs")
+
     from codegraph_design.agents.design_oo import design_and_persist_hlr
     result = design_and_persist_hlr(
         hlr_uid=hlr_uid,
-        log_dir=params.get("log_dir") or "",
+        log_dir=params.get("log_dir") or default_log_dir,
     )
 
     # Auto-export design artifacts

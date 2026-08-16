@@ -3,22 +3,28 @@
 A [Pi](https://github.com/nicobailon/pi) extension that bundles the
 [**codegraph**](../codegraph) and [**doxygen-index**](../doxygen-dependency-parser)
 libraries into one portable package. It can **bootstrap its own Python
-environment**, **generate a project's indexing config**, **manage a
-project-local Neo4j Docker container**, **index source code into the graph**,
-and then **retrieve rich knowledge-graph context** for an AI coding agent —
-plus an interactive HTML visualizer for the neighborhood of any code object.
+environment**, **generate a project's indexing config**, **index source code
+into the graph**, and then **retrieve rich knowledge-graph context** for an AI
+coding agent — plus an interactive HTML visualizer for the neighborhood of any
+code object.
+
+The graph backend is **SQLite by default** (a plain file — no Docker, no
+service to run) with **Neo4j/Docker as an opt-in** via `backend='neo4j'` or
+`CODEGRAPH_BACKEND=neo4j`.
 
 The design goal is a **narrow tool surface**: instead of exposing every
-library operation as its own tool, three richly-parameterised entry points
+library operation as its own tool, richly-parameterised entry points
 steer all retrieval *and* setup. A long-lived Python sidecar holds a single
 `CodeGraphDispatcher` (with its cached `LayerGraph`) for the whole session,
 so repeated fetches, format re-exports, and renders avoid re-initialising
-Neo4j.
+the backend.
 
 ## Tools
 
-The extension exposes **four** tools. `codegraph_query`, `codegraph_explore`, and
-`codegraph_tests` are read-only retrieval; `codegraph_setup` bootstraps and
+The extension exposes **nine** tools. `codegraph_query`, `codegraph_explore`,
+`codegraph_tests`, `codegraph_stats`, `codegraph_discover`, and
+`codegraph_memory` are read-only retrieval; `codegraph_decompose` and
+`codegraph_design` run the agent pipelines; `codegraph_setup` bootstraps and
 operates the graph.
 
 ### `codegraph_setup` — bootstrap & operate
@@ -30,15 +36,15 @@ start with `bootstrap_env`; to graph a new project end-to-end, use `bootstrap`.
 |---|---|---|
 | `bootstrap_env` | — | create/refresh a venv with `codegraph` + `doxygen-index` installed, then restart the bridge under it. Run once per machine. Sources overridable via `codegraph_source` / `doxygen_index_source` (pass a path for an editable install). |
 | `init_config` | `project_dir` | auto-detect language (C++/Python), `input_paths`, `test_paths`, and project name (from `pyproject.toml` or dir name) and write `.doxygen-index.toml`. Override any field; `force` to overwrite. |
-| `index` | `project_dir` | run `doxygen-index` to parse the project and ingest into Neo4j (`format: neo4j`, default) or write JSON (`format: json`, also emits HTML when `[codegraph-html]` is configured). |
-| `db_start` / `db_stop` / `db_restart` / `db_status` | `project_dir` | manage the project-local Neo4j Docker container (`neo4j-<project>`, data bind-mounted at `codegraph/neo4j/`) via the `codegraph-db` CLI. |
-| `bootstrap` | `project_dir` | one-shot pipeline: `init_config` → `db_start` → `index`. |
-| `status` | `project_dir?` | health overview: bridge ping, codegraph version, Neo4j reachability, Docker container state, available tags + node counts. |
+| `index` | `project_dir` | run `doxygen-index` to parse the project and ingest into the active backend (`format: neo4j`, default — SQLite unless `backend='neo4j'`) or write JSON (`format: json`, also emits HTML when `[codegraph-html]` is configured). |
+| `db_start` / `db_stop` / `db_restart` / `db_status` | `project_dir` | **Neo4j backend only** — manage the project-local Neo4j Docker container (`neo4j-<project>`, data bind-mounted at `codegraph/neo4j/`) via the `codegraph-db` CLI. |
+| `bootstrap` | `project_dir` | one-shot pipeline: `init_config` → `index` (`db_start` only when `backend='neo4j'`). |
+| `status` | `project_dir?` | health overview: bridge ping, codegraph version, backend reachability (+ SQLite DB file info, or Docker state for Neo4j), available tags + node counts. |
 
 Typical first-run workflow:
 
 1. `codegraph_setup` → `bootstrap_env` (provision the venv)
-2. `codegraph_setup` → `bootstrap` with `project_dir` (config + Neo4j + index)
+2. `codegraph_setup` → `bootstrap` with `project_dir` (config + index — SQLite by default, no Docker)
 3. `codegraph_explore` → `search` to find symbols
 4. `codegraph_query` → `neighborhood` to fetch full context
 5. `codegraph_query` → `html` to *see* the graph
@@ -123,10 +129,11 @@ expansion surfaces tests of every method on a class.
 
 ### Prerequisites
 
-- **Docker** — only needed for the project-local Neo4j container
-  (`codegraph_setup` actions `db_*` / `bootstrap`). If you already run a
-  Neo4j elsewhere, set `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` and
-  skip the Docker actions.
+- **Docker** — only needed if you opt into the **Neo4j backend**
+  (`backend='neo4j'`, `CODEGRAPH_BACKEND=neo4j`, or the `db_*` actions).
+  The default SQLite backend is a plain file — nothing to install or run.
+  If you already run Neo4j elsewhere, set `NEO4J_URI` / `NEO4J_USER` /
+  `NEO4J_PASSWORD` and skip the Docker actions.
 - `doxygen` on PATH — only needed for **C++** projects (`index` action).
 - A **Python 3.10+** interpreter — only needed to create the bootstrapped
   venv (`bootstrap_env`). The extension otherwise runs entirely inside that
@@ -171,14 +178,22 @@ afterwards — no `export` needed. (You can also `export CODEGRAPH_PYTHON=...`
 per shell, or pass `--codegraph-python <path>` per launch; the persisted config
 sits between the env var and the bootstrapped venv in precedence.)
 
-### Neo4j connection
+### Backend configuration
 
 The sidecar **auto-loads a `.env` from the working directory (or nearest
-parent)** for `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD`, so a folder that
-already has one (e.g. after `codegraph-db start`, which writes it) needs no
-extra setup. Real environment variables always take precedence. Otherwise set
-`NEO4J_URI` (default `bolt://localhost:7687`), `NEO4J_USER` (default `neo4j`),
-`NEO4J_PASSWORD`.
+parent)** for `CODEGRAPH_BACKEND` / `SQLITE_PATH` / `NEO4J_URI` /
+`NEO4J_USER` / `NEO4J_PASSWORD`, so a folder that already has one needs no
+extra setup. Real environment variables take precedence for most keys;
+`NEO4J_*` in `.env` are authoritative (they override an inherited
+environment, mirroring the `LLM_*` handling).
+
+The backend is selected via `CODEGRAPH_BACKEND`:
+
+- `sqlite` (default) — a plain SQLite file at `SQLITE_PATH` (default
+  `codegraph.sqlite3` relative to the project dir). No service to manage.
+- `neo4j` — the project-local Neo4j Docker container, with `NEO4J_URI`
+  (default `bolt://localhost:7687`), `NEO4J_USER` (default `neo4j`),
+  `NEO4J_PASSWORD`.
 
 ### Load into Pi
 
@@ -221,7 +236,7 @@ relational questions:
 
 ## Codebase exploration
 
-This repository is indexed in a codegraph knowledge graph (Neo4j). The
+This repository is indexed in a codegraph knowledge graph. The
 `codegraph_query`, `codegraph_explore`, and `codegraph_tests` tools retrieve structured graph
 context (classes, members, call graphs, inheritance, namespaces, tests) that is far
 richer than grepping source.
@@ -264,22 +279,26 @@ fires *before* execution and can return `{block: true, reason}` (and mutate
 `event.input`), so the extension intercepts the read and redirects the agent.
 Use it when you want guaranteed steering; leave it off and rely on `AGENTS.md`
 otherwise.
-| — | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | localhost defaults | Neo4j connection |
+| — | `CODEGRAPH_BACKEND` / `SQLITE_PATH` | `sqlite` / `codegraph.sqlite3` | backend selection (SQLite default; `neo4j` opts into Docker) |
+| — | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | localhost defaults | Neo4j backend connection (opt-in) |
 
 ## Architecture
 
 ```
 Pi session  ──►  index.ts (TS extension)
-                  │  registers 4 tools (query / explore / tests / setup) + /codegraph + flags
+                  │  registers 9 tools (query / explore / tests / stats / setup / discover / decompose / design / memory) + /codegraph + flags
                   │  bootstrap_env (TS-side): creates venv, pip-installs codegraph + doxygen-index
                   │  spawns & keeps alive:
                   ▼
                   bridge/codegraph_bridge.py  (stdio JSON-RPC daemon, runs in the venv)
-                  │  query/explore → CodeGraphDispatcher (cached current_graph) → Neo4j
+                  │  query/explore → CodeGraphDispatcher (cached current_graph) → active backend
                   │  setup → subprocesses: `doxygen-index` CLI (parse+ingest)
-                  │                          `codegraph-db` CLI  (Neo4j Docker lifecycle)
+                  │                          `codegraph-db` CLI  (Neo4j backend lifecycle)
                   ▼
-                  Neo4j  ◄── codegraph neomodel models  ◄── doxygen-index parser
+        ┌─────────────────────┐
+        │  SQLite (default)   │  ◄── codegraph portable Backend API  ◄── doxygen-index parser
+        │  Neo4j (opt-in)     │
+        └─────────────────────┘
 ```
 
 The bridge speaks newline-delimited JSON over stdin/stdout
@@ -300,7 +319,7 @@ or wheels — instead `codegraph_setup action='bootstrap_env'` provisions a
 self-contained venv at `~/.pi/agent/codegraph/venv` (overridable) and
 installs `codegraph` + `doxygen-index` from PyPI or local paths. The bridge
 then runs inside that venv, so the extension is portable to any machine with
-Python 3.10+ (and Docker for the Neo4j container).
+Python 3.10+ (Docker only if you opt into the Neo4j backend).
 
 ## Develop
 

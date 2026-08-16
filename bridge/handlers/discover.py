@@ -14,9 +14,9 @@ def get_discovery_dispatcher():
 
 _DISCOVERY_ACTIONS = {
     "search_requirements": ("query", "scope", "limit"),
-    "get_hlr_dependencies": ("refid", "direction"),
+    "get_hlr_dependencies": ("uid", "direction"),
     "list_requirements": ("component_name", "tag"),
-    "get_requirement_traces": ("refid",),
+    "get_requirement_traces": ("uid",),
     "build_design_context": ("feature_description", "component_name"),
     # Workflow tools (ported from scripts/)
     "ingest_design": ("file_path", "tag"),

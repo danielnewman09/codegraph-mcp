@@ -13,7 +13,7 @@ _ACTION_TO_TOOL = {
     "tags": ("graph_list_tags", ()),
     "inheritance": ("find_inheritance", ("qualified_name",)),
     "callers_callees": ("find_callers_and_callees", ("qualified_name",)),
-    "hlr_subtree": ("get_hlr_subtree", ("refid",)),
+    "hlr_subtree": ("get_hlr_subtree", ("uid",)),
 }
 
 

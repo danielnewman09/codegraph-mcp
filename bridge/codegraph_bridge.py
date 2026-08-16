@@ -15,10 +15,11 @@ Handler modules live in ``handlers/`` — one per functional group
 (query, explore, tests, stats, setup, discover, decompose, design, memory).
 The bridge dispatches incoming JSON-RPC methods to the appropriate handler.
 
-The Neo4j connection is configured from environment variables
-(``NEO4J_URI``, ``NEO4J_USER``, ``NEO4J_PASSWORD``) by
-:mod:`codegraph.config` at import time; the child process inherits the
-host environment.
+The active backend is selected via ``CODEGRAPH_BACKEND`` (``sqlite``
+by default, ``neo4j`` optional) by :mod:`codegraph.backends`; the child
+process inherits the host environment, and the bridge pre-loads a
+repo-root ``.env`` so ``CODEGRAPH_BACKEND`` / ``SQLITE_PATH`` /
+``NEO4J_*`` can be configured without exporting shell variables.
 """
 
 from __future__ import annotations
@@ -35,9 +36,9 @@ if _here not in sys.path:
     sys.path.insert(0, _here)
 
 # ── dotenv loader ──────────────────────────────────────────────────────────
-# Must run BEFORE any handler imports so NEO4J_URI / NEO4J_USER /
-# NEO4J_PASSWORD are in os.environ when codegraph.persistence.config
-# is loaded at import time.
+# Must run BEFORE any handler imports so CODEGRAPH_BACKEND / SQLITE_PATH /
+# NEO4J_URI / NEO4J_USER / NEO4J_PASSWORD are in os.environ before
+# codegraph.backends auto-configures the backend.
 
 def _load_dotenv() -> None:
     """Load a .env from the cwd or nearest parent (real env vars win)."""
@@ -62,8 +63,8 @@ def _load_dotenv() -> None:
                     val = val.strip().strip('"').strip("'")
                     if key and key not in os.environ:
                         os.environ[key] = val
-                    elif key and key in os.environ and (key.startswith("LLM") or key == "ENRICH_LOG_DIR"):
-                        # .env is authoritative for LLM config — always override
+                    elif key and key in os.environ and (key.startswith("LLM") or key.startswith("NEO4J") or key == "ENRICH_LOG_DIR"):
+                        # .env is authoritative for LLM and NEO4J config — always override
                         os.environ[key] = val
             except Exception:
                 pass
@@ -89,17 +90,44 @@ from handlers.memory import handle_memory  # noqa: E402
 # ── Main loop ──────────────────────────────────────────────────────────────
 
 def main() -> None:
+    # ── File logging ───────────────────────────────────────────────────
+    # All Python logs (bridge, agents, llm_caller) go to stderr for the
+    # Pi extension to read AND to a timestamped file in codegraph/logs/
+    # for offline inspection.
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    _log_dir = Path.cwd() / "codegraph" / "logs"
+    _log_dir.mkdir(parents=True, exist_ok=True)
+    _log_file = _log_dir / f"bridge-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.log"
+
+    _file_handler = logging.FileHandler(str(_log_file), encoding="utf-8")
+    _file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    ))
+    _file_handler.setLevel(logging.DEBUG)
+
+    # Attach to the root logger so all child loggers inherit it.
+    _root = logging.getLogger()
+    _root.addHandler(_file_handler)
+    _root.setLevel(logging.DEBUG)
+
+    # Suppress verbose libraries
+    for noisy in ("neo4j", "neomodel", "py2neo", "urllib3", "httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    # Neo4j UNRECOGNIZED notifications (missing labels/properties/rel-types
+    # from probing queries) are already suppressed at the driver level in
+    # connection.get_session().  Set the fallback logger to ERROR so any
+    # remaining notifications that bypass the driver config don't spam.
+    logging.getLogger("neo4j.notifications").setLevel(logging.ERROR)
+
     # Line-buffer stderr so diagnostics appear promptly.
     try:
         sys.stderr.reconfigure(line_buffering=True)  # py3.7+
     except Exception:
         pass
-
-    # Silence noisy DBMS notifications (e.g. "relationship type `RETURNS` does
-    # not exist") emitted by the neo4j driver / neomodel when walking edges
-    # for relationship types not present in the current schema.
-    for noisy in ("neo4j", "neomodel", "py2neo"):
-        logging.getLogger(noisy).setLevel(logging.ERROR)
 
     for raw in sys.stdin:
         raw = raw.strip()

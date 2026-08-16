@@ -1,94 +1,138 @@
 # ── Stats: compact summary to avoid blowing context windows ────────────
+#
+# Backend-agnostic: uses only the portable Backend / GraphRepository API
+# (no raw Cypher), so it works identically against SQLite (the default)
+# and Neo4j.
 
 
 def handle_stats():
     """Return compact high-level statistics — node/rel counts, description
     coverage, test summary — so agents can troubleshoot without pulling
     thousands of nodes (as ``scope=kind, kind=test`` would)."""
-    from codegraph.persistence.connection import get_session
+    from codegraph import get_backend
+    from codegraph.constants import NODE_KINDS, PREDICATE_TO_REL_TYPE, TAGS
+    from codegraph.models.test import (
+        AssertionNode, TestFixtureNode, TestNode, TestStepNode,
+    )
 
-    with get_session() as s:
-        total = s.run("MATCH (n) RETURN count(n) AS total").data()[0]["total"]
+    backend = get_backend()
+    graph = backend.graph
 
-        by_kind = s.run(
-            "MATCH (n) RETURN n.kind AS kind, count(n) AS count ORDER BY count DESC"
-        ).data()
+    # Known relationship types: graph predicates + memory/requirements rels.
+    _MEMORY_RELS = {
+        "MOTIVATES", "CONSTRAINS", "EXPLAINS", "ASSUMES", "TRADES_OFF",
+        "INSIGHT_INTO", "SUPERSEDES", "REFINES", "CONTRADICTS",
+    }
+    _REL_TYPES = sorted(set(PREDICATE_TO_REL_TYPE.values()) | _MEMORY_RELS)
 
-        by_source = s.run(
-            "MATCH (n) WHERE n.source IS NOT NULL "
-            "RETURN n.source AS source, count(n) AS count ORDER BY count DESC"
-        ).data()
+    rel_counts: dict[str, int] = {}
+    for rt in _REL_TYPES:
+        try:
+            c = graph.count_relationships([rt])
+        except Exception:
+            c = 0
+        if c:
+            rel_counts[rt] = c
+    total_relationships = sum(rel_counts.values())
+    total_nodes = graph.count_all_nodes()
 
-        tags_data = s.run(
-            "MATCH (n) WHERE n.tags IS NOT NULL UNWIND n.tags AS tag "
-            "RETURN tag, count(n) AS count ORDER BY count DESC"
-        ).data()
+    # Per-kind pass: counts, description/LLM coverage, and source rollup.
+    by_kind: list[dict] = []
+    property_coverage: list[dict] = []
+    sources: dict[str, int] = {}
+    for kind, _display in NODE_KINDS:
+        try:
+            nodes = graph.find_all_by_kind(kind)
+        except Exception:
+            continue
+        if not nodes:
+            continue
+        described = sum(1 for n in nodes if getattr(n, "description", None))
+        enriched = sum(1 for n in nodes if getattr(n, "llm_enriched", None))
+        for n in nodes:
+            src = getattr(n, "source", None)
+            if src:
+                sources[src] = sources.get(src, 0) + 1
+        by_kind.append({"kind": kind, "count": len(nodes)})
+        property_coverage.append({
+            "kind": kind,
+            "total": len(nodes),
+            "with_description": described,
+            "llm_enriched": enriched,
+        })
 
-        prop = s.run(
-            "MATCH (n) "
-            "WHERE n.kind IN ['class','method','function','test','test_step','test_fixture','assertion'] "
-            "RETURN n.kind AS kind, count(n) AS total, "
-            "count(CASE WHEN n.description IS NOT NULL AND n.description <> '' THEN 1 END) AS with_description, "
-            "count(CASE WHEN n.llm_enriched IS NOT NULL AND n.llm_enriched THEN 1 END) AS llm_enriched "
-            "ORDER BY kind"
-        ).data()
+    by_source = [
+        {"source": s, "count": c}
+        for s, c in sorted(sources.items(), key=lambda kv: -kv[1])
+    ]
 
-        rels = s.run(
-            "MATCH ()-[r]->() RETURN type(r) AS rel_type, count(r) AS count ORDER BY count DESC LIMIT 20"
-        ).data()
-        total_rels = sum(r["count"] for r in rels)
+    by_tag = []
+    for tag in sorted(TAGS):
+        try:
+            count = len(graph.find_uids_by_tag(tag))
+        except Exception:
+            count = 0
+        if count:
+            by_tag.append({"tag": tag, "count": count})
 
-        test_summary = s.run(
-            "MATCH (t) WHERE t.kind = 'test' "
-            "OPTIONAL MATCH (t)-[:COMPOSES]->(step) WHERE step.kind = 'test_step' "
-            "OPTIONAL MATCH (t)-[:VERIFIES]->(code) "
-            "RETURN count(DISTINCT t) AS test_count, "
-            "count(DISTINCT step) AS step_count, "
-            "count(DISTINCT code) AS verifies_count, "
-            "count(DISTINCT CASE WHEN t.description IS NOT NULL AND t.description <> '' THEN t END) AS described_tests"
-        ).data()[0]
-
-        # Memory node summary
-        memory_labels = [
-            "DecisionNode", "ConstraintNode", "RationaleNode",
-            "AssumptionNode", "TradeoffNode", "InsightNode",
-        ]
-        memory_counts: dict[str, int] = {}
-        memory_total = 0
-        for label in memory_labels:
-            count = s.run(
-                f"MATCH (n:`{label}`) RETURN count(n) AS c"
-            ).data()[0]["c"]
-            if count > 0:
-                memory_counts[label] = count
-                memory_total += count
-
-        memory_rels = [
-            "MOTIVATES", "CONSTRAINS", "EXPLAINS", "ASSUMES",
-            "TRADES_OFF", "INSIGHT_INTO", "SUPERSEDES", "REFINES",
-            "CONTRADICTS",
-        ]
-        memory_rel_counts: dict[str, int] = {}
-        for rel in memory_rels:
-            count = s.run(
-                f"MATCH ()-[r:`{rel}`]->() RETURN count(r) AS c"
-            ).data()[0]["c"]
-            if count > 0:
-                memory_rel_counts[rel] = count
-
-        return {
-            "total_nodes": total,
-            "total_relationships": total_rels,
-            "by_kind": by_kind,
-            "by_source": by_source,
-            "by_tag": tags_data,
-            "property_coverage": prop,
-            "relationships": rels,
-            "test_summary": test_summary,
-            "memory_summary": {
-                "total_memory_nodes": memory_total,
-                "by_type": memory_counts,
-                "relationships": memory_rel_counts,
-            },
+    # Test summary (test / test_step / test_fixture / assertion + VERIFIES).
+    try:
+        tests = backend.find_all(TestNode)
+        test_steps = backend.find_all(TestStepNode)
+        test_fixtures = backend.find_all(TestFixtureNode)
+        assertions = backend.find_all(AssertionNode)
+        described_tests = sum(
+            1 for t in tests if getattr(t, "description", None)
+        )
+        verifies_targets: set[str] = set()
+        for t in tests:
+            for edge in backend.get_all_edges(t):
+                if edge.relation_type == "VERIFIES" and edge.is_outgoing:
+                    verifies_targets.add(edge.target_uid)
+        test_summary = {
+            "test_count": len(tests),
+            "step_count": len(test_steps),
+            "fixture_count": len(test_fixtures),
+            "assertion_count": len(assertions),
+            "verifies_count": len(verifies_targets),
+            "described_tests": described_tests,
         }
+    except Exception:
+        test_summary = {}
 
+    # Memory node summary.
+    memory_summary: dict = {"total_memory_nodes": 0, "by_type": {}}
+    try:
+        from codegraph_memory.models import (
+            AssumptionNode, ConstraintNode, DecisionNode,
+            InsightNode, RationaleNode, TradeoffNode,
+        )
+
+        for cls in (
+            DecisionNode, ConstraintNode, RationaleNode,
+            AssumptionNode, TradeoffNode, InsightNode,
+        ):
+            try:
+                nodes = backend.find_all(cls)
+            except Exception:
+                continue
+            if nodes:
+                memory_summary["by_type"][cls.__name__] = len(nodes)
+                memory_summary["total_memory_nodes"] += len(nodes)
+    except Exception:
+        pass
+
+    return {
+        "total_nodes": total_nodes,
+        "total_relationships": total_relationships,
+        "by_kind": by_kind,
+        "by_source": by_source,
+        "by_tag": by_tag,
+        "property_coverage": property_coverage,
+        "relationships": [
+            {"rel_type": rt, "count": c}
+            for rt, c in sorted(rel_counts.items(), key=lambda kv: -kv[1])
+        ],
+        "test_summary": test_summary,
+        "memory_summary": memory_summary,
+    }

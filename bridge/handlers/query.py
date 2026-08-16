@@ -23,12 +23,12 @@ Two methods mirror the extension's two-tool surface:
 Both reuse the existing :class:`codegraph.tools.CodeGraphDispatcher`,
 which caches the last fetched graph in ``current_graph`` so that
 ``scope=cached`` re-exports and ``format=html`` renders can reuse it
-without re-querying Neo4j.
+without re-querying the backend.
 
-The Neo4j connection is configured from environment variables
-(``NEO4J_URI``, ``NEO4J_USER``, ``NEO4J_PASSWORD``) by
-:mod:`codegraph.config` at import time; the child process inherits the
-host environment.
+The active backend (SQLite by default, Neo4j optional) is selected via
+the ``CODEGRAPH_BACKEND`` environment variable by
+:mod:`codegraph.backends`; the child process inherits the host
+environment and the bridge pre-loads a repo-root ``.env``.
 """
 
 from __future__ import annotations
@@ -157,12 +157,15 @@ def handle_ping() -> dict:
 
 
 def handle_debug_env() -> dict:
-    """Debug endpoint — dump LLM config for troubleshooting."""
+    """Debug endpoint — dump backend + LLM config for troubleshooting."""
     import os as _os
     return {
         "cwd": _os.getcwd(),
         "llm_vars": {k: _os.environ.get(k) for k in sorted(_os.environ) if k.startswith("LLM_")},
-        "neo4j_vars": {k: _os.environ.get(k) for k in sorted(_os.environ) if k.startswith("NEO4J_")},
+        "backend": {
+            k: _os.environ.get(k) for k in sorted(_os.environ)
+            if k.startswith("CODEGRAPH_") or k in ("SQLITE_PATH", "NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD")
+        },
     }
 
 
@@ -178,7 +181,7 @@ def handle_query(params: dict):
     if fmt == "html":
         graph = _build_graph(disp, scope, params)
         disp.current_graph = graph  # cache for scope=cached / re-renders
-        from codegraph.viz.api import _render_html
+        from codegraph.export.viz.api import _render_html
 
         size = params.get("size", "large")
         title = _title_for(scope, params)

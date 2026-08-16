@@ -1,10 +1,14 @@
-"""Setup handler — bootstrap, config, indexing, Neo4j/Docker lifecycle.
+"""Setup handler — bootstrap, config, indexing, backend lifecycle.
 
 These actions drive the ``doxygen-index`` and ``codegraph-db`` CLIs as
 subprocesses (``sys.executable -m <module>``) so their stdout/stderr and
 ``sys.exit`` behaviour can never corrupt this bridge's JSON framing channel.
 They run in the same interpreter/venv as the bridge, so the CLIs are
 guaranteed to be importable once the environment is bootstrapped.
+
+The default backend is SQLite (a plain file — no Docker).  Pass
+``backend="neo4j"`` to opt into the Neo4j/Docker flow; the ``db_*``
+actions remain available for that backend.
 """
 from __future__ import annotations
 
@@ -124,8 +128,24 @@ def _render_doxygen_toml(cfg: dict, html: bool) -> str:
     ]
     if cfg.get("test_paths"):
         lines.append('test_paths = ' + json.dumps(cfg["test_paths"]))
+    if html:
+        lines.append("")
+        lines.append("[codegraph-html]")
+        lines.append('output_dir = "codegraph"')
+        lines.append('size = "large"')
+    return "\n".join(lines) + "\n"
+
 
 # ── Setup ─────────────────────────────────────────────────────────────────
+
+
+def _apply_backend(params: dict) -> None:
+    """Honour an optional ``backend`` param ("sqlite" | "neo4j") by setting
+    CODEGRAPH_BACKEND for CLI subprocesses.  Without it, the codegraph
+    default applies (SQLite)."""
+    backend = (params.get("backend") or "").strip().lower()
+    if backend in ("sqlite", "neo4j"):
+        os.environ["CODEGRAPH_BACKEND"] = backend
 
 
 def handle_setup(params: dict):
@@ -153,13 +173,20 @@ def handle_setup(params: dict):
                 "toml": _render_doxygen_toml(cfg, html=html)}
 
     if action == "index":
+        _apply_backend(params)
+        # "neo4j" here means "ingest into the active graph backend" — which
+        # is SQLite by default (CODEGRAPH_BACKEND=sqlite) or Neo4j when
+        # selected.  "json" writes a JSON file (plus HTML when configured).
         fmt = params.get("format", "neo4j")
         timeout = float(params.get("timeout", 600))
         args = ["project", pd, "--format", fmt]
         # Default clear=False so an inadvertent agent call can't wipe an
         # existing source. Pass clear=true explicitly to replace data.
         if params.get("clear", False):
-            args.append("--clear")
+            # --yes skips the CLI's interactive "Proceed? [y/N]" prompt, which
+            # would otherwise block (or EOFError) in this non-interactive
+            # subprocess.
+            args += ["--clear", "--yes"]
         if params.get("output_dir"):
             args += ["--output-dir", params["output_dir"]]
         if params.get("source"):
@@ -168,6 +195,7 @@ def handle_setup(params: dict):
             args += ["--test-paths", *params["test_paths"]]
         res = _run_cli("doxygen_index.cli", args, cwd=pd, timeout=timeout)
         res["format"] = fmt
+        res["backend"] = os.environ.get("CODEGRAPH_BACKEND", "sqlite")
         return res
 
     if action in ("db_start", "db_stop", "db_restart", "db_status"):
@@ -205,19 +233,22 @@ def handle_setup(params: dict):
         return res
 
     if action == "bootstrap":
-        # One-shot: init_config → db_start → index(neo4j)
+        # One-shot: init_config → (db_start only for explicit Neo4j) → index.
+        # With the default SQLite backend there is no Docker step at all.
+        _apply_backend(params)
+        backend = os.environ.get("CODEGRAPH_BACKEND", "sqlite")
         steps = []
         cfg_res = handle_setup({**params, "action": "init_config"})
         steps.append({"step": "init_config", "result": cfg_res})
         fmt = params.get("format", "neo4j")
-        if fmt == "neo4j":
+        if fmt == "neo4j" and backend == "neo4j":
             db_res = handle_setup({**params, "action": "db_start", "timeout": 120})
             steps.append({"step": "db_start", "result": db_res})
         idx_res = handle_setup({**params, "action": "index", "format": fmt,
                                 "clear": True,
                                 "timeout": params.get("timeout", 600)})
         steps.append({"step": "index", "result": idx_res})
-        return {"bootstrapped": True, "steps": steps}
+        return {"bootstrapped": True, "backend": backend, "steps": steps}
 
     if action == "status":
         out = {"bridge": True}
@@ -227,14 +258,29 @@ def handle_setup(params: dict):
         except Exception as e:
             out["codegraph_version"] = f"import error: {e}"
         try:
-            from codegraph.persistence.connection import verify_connectivity
-            out["neo4j_reachable"] = bool(verify_connectivity())
+            from codegraph import get_backend
+            backend = get_backend()
+            out["backend"] = type(backend).__name__.replace("Backend", "").lower()
+            out["backend_reachable"] = bool(backend.verify_connectivity())
         except Exception as e:
-            out["neo4j_reachable"] = False
-            out["neo4j_error"] = str(e)
-        if params.get("project_dir"):
+            out["backend"] = "unknown"
+            out["backend_reachable"] = False
+            out["backend_error"] = str(e)
+        if params.get("project_dir") and out.get("backend") == "neo4j":
             out["docker"] = _run_cli("codegraph.persistence.db_cli", ["status", "--project-dir", pd],
-                                     cwd=pd, timeout=30)
+                                      cwd=pd, timeout=30)
+        elif params.get("project_dir"):
+            from pathlib import Path
+            import os as _os
+            path = _os.environ.get("SQLITE_PATH", "codegraph.sqlite3")
+            db_path = Path(path)
+            if not db_path.is_absolute():
+                db_path = Path(pd) / path
+            out["sqlite_db"] = {
+                "path": str(db_path),
+                "exists": db_path.is_file(),
+                "size_bytes": db_path.stat().st_size if db_path.is_file() else 0,
+            }
         try:
             out["tags"] = json.loads(handle_explore({"action": "tags"}))
         except Exception as e:

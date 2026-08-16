@@ -10,7 +10,7 @@
  *   codegraph_explore — lightweight lookups returning slim JSON.
  *   codegraph_tests   — test-focused exploration.
  *   codegraph_stats   — compact high-level statistics.
- *   codegraph_setup   — bootstrap env, config, indexing, Neo4j/Docker.
+ *   codegraph_setup   — bootstrap env, config, indexing, backend lifecycle (SQLite default, Neo4j optional).
  *   codegraph_discover — discover existing requirements before designing.
  *   codegraph_decompose — decompose HLR → LLRs with verification stubs.
  *   codegraph_design   — OO class design, resolve verification stubs.
@@ -189,8 +189,9 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
     if (bridge && bridge.isRunning()) return bridge;
     if (!bridge) {
       // Load .env from project directory before spawning the bridge.
-      // The bridge inherits process.env; we merge .env vars so Neo4j
-      // credentials and other project config are available.
+      // The bridge inherits process.env; we merge .env vars so the backend
+      // (CODEGRAPH_BACKEND / SQLITE_PATH / NEO4J_*) and other project config
+      // are available.
       const projectEnv = loadEnvFile(join(process.cwd(), ".env"));
       bridge = new CodegraphBridge(resolvePython(), resolveBridgePath(), projectEnv);
     }
@@ -279,7 +280,7 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
   const SOURCE_SEG = /(^|[\\/])(src|lib|libs|app|internal|pkg|cmd|api|core|services|components|modules|packages)([\\/]|$)/;
   const looksLikeSource = (p: string): boolean => SOURCE_EXT.test(p) || SOURCE_SEG.test(p);
   const STEER_REASON =
-    "This repository is indexed in a codegraph knowledge graph (Neo4j). " +
+    "This repository is indexed in a codegraph knowledge graph. " +
     "Before reading source files to understand structure, call graphs, or " +
     "class/method relationships, first call codegraph_explore (action: search/compound/member/callers_callees/inheritance) " +
     "and/or codegraph_query (scope: neighborhood, format: markdown) to retrieve graph context, " +

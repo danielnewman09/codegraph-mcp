@@ -29,7 +29,7 @@ export function registerExploreTool(
       "Use action='tags' or 'sources' first to discover what views/projects are indexed before fetching.",
       "Use action='namespaces' to list all namespaces with entity counts — find components without pulling the full graph.",
       "Use action='inheritance' / 'callers_callees' for relationship-specific lookups, then codegraph_query scope='neighborhood' for full context.",
-      "Use action='hlr_subtree' with an HLR refid to retrieve the complete requirements tree (HLR → LLRs → tests → scaffold nodes) before decomposing or designing.",
+      "Use action='hlr_subtree' with an HLR uid to retrieve the complete requirements tree (HLR → LLRs → tests → scaffold nodes) before decomposing or designing.",
       "These return compact JSON; follow up with codegraph_query to retrieve formatted, complete context for the symbols you found.",
     ],
     parameters: Type.Object({
@@ -39,7 +39,7 @@ export function registerExploreTool(
           description:
             "search (needs query): find compounds by name substring. compound/member/inheritance/callers_callees (need qualified_name). " +
             "namespace (needs namespace): list compounds under a prefix. sources / tags: list indexed projects / provenance tags. " +
-            "hlr_subtree (needs refid): fetch the full requirements subtree (HLR→LLRs→tests→scaffolds).",
+            "hlr_subtree (needs uid): fetch the full requirements subtree (HLR→LLRs→tests→scaffolds).",
         },
       ),
       qualified_name: Type.Optional(Type.String({
@@ -63,14 +63,14 @@ export function registerExploreTool(
       limit: Type.Optional(Type.Number({
         description: "Maximum results for search/namespace (default 30 / 50).",
       })),
-      refid: Type.Optional(Type.String({
-        description: "HLR refid for action=hlr_subtree.",
+      uid: Type.Optional(Type.String({
+        description: "HLR uid for action=hlr_subtree.",
       })),
     }),
     renderCall(args, _theme, context) {
       const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-      const p = args as { action?: string; query?: string; qualified_name?: string; namespace?: string };
-      const target = p.query ?? p.qualified_name ?? p.namespace ?? "";
+      const p = args as { action?: string; query?: string; qualified_name?: string; namespace?: string; uid?: string };
+      const target = p.query ?? p.qualified_name ?? p.namespace ?? p.uid ?? "";
       text.setText(["codegraph_explore", p.action ?? "", target].filter(Boolean).join("  "));
       return text;
     },

@@ -7,8 +7,8 @@
  * tests can inject temporary directories.
  */
 
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
   CodegraphBridge,
@@ -18,6 +18,7 @@ import {
 } from "./bridge.js";
 import {
   loadEnvFile,
+  pluginRoot,
   readConfig,
   writeConfig,
   venvBinPath,
@@ -27,6 +28,10 @@ import {
 } from "./config.js";
 import { runProcess, type ProcessResult } from "./subprocess.js";
 import { tail, bridgeResultFromResponse } from "./results.js";
+import {
+  assertDatabaseOutsidePlugin,
+  type ProjectContext,
+} from "./project.js";
 import type {
   BridgeCallResult,
   TimeoutClass,
@@ -39,12 +44,62 @@ const DEFAULT_TIMEOUTS: Record<TimeoutClass, number> = {
   agent: SETUP_TIMEOUT_MS,
 };
 
+/**
+ * Resolve a child-executable path against the TS process cwd so it stays
+ * valid when the bridge runs with a different (project) cwd.  Bare command
+ * names (`node`, `python3`) pass through untouched.
+ */
+function normalizeChildExecutable(p: string): string {
+  if (isAbsolute(p)) return p;
+  if (p.includes("/") || p.includes("\\")) return resolve(p);
+  return p;
+}
+
 export class CodegraphRuntime {
   readonly config: RuntimeConfig;
   private bridge: CodegraphBridge | null = null;
+  private _project: ProjectContext | null = null;
+  /** In-flight bridge calls started through this runtime. */
+  private inFlight = new Set<Promise<unknown>>();
 
-  constructor(config: RuntimeConfig) {
+  constructor(config: RuntimeConfig, project?: ProjectContext) {
     this.config = config;
+    this._project = project ?? null;
+  }
+
+  /** The resolved project context (manifest / SQLITE_PATH / fallback). */
+  get project(): ProjectContext | null {
+    return this._project;
+  }
+
+  /**
+   * Swap the active project.  Waits for in-flight bridge calls to settle
+   * first, then stops the bridge so the new project's database/environment
+   * is picked up on the next call — we never switch a bridge with active
+   * work (which would kill an in-progress index or migration).
+   */
+  async updateProject(project: ProjectContext | null): Promise<void> {
+    await this.waitForIdle();
+    await this.stopBridge();
+    this._project = project;
+  }
+
+  /**
+   * Wait until no bridge calls are in flight.  Calls carry their own
+   * timeouts, so this settles naturally; a hard cap only guards against a
+   * pathological stuck caller.
+   */
+  private async waitForIdle(capMs = 600_000): Promise<void> {
+    const started = Date.now();
+    while (this.inFlight.size > 0) {
+      if (Date.now() - started > capMs) {
+        process.stderr.write(
+          `[codegraph] updateProject: giving up after ${capMs}ms waiting for active bridge calls — replacing the bridge anyway\n`,
+        );
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
   }
 
   // ── Bridge lifecycle ───────────────────────────────────────────
@@ -54,10 +109,31 @@ export class CodegraphRuntime {
     if (this.bridge && this.bridge.isRunning()) return this.bridge;
     if (!this.bridge) {
       const projectEnv = loadEnvFile(join(this.config.cwd, ".env"));
+      const env: Record<string, string> = { ...projectEnv };
+      let cwd: string | undefined = this.config.cwd;
+
+      if (this._project) {
+        const p = this._project;
+        // Startup invariant: the plugin bundle is code, not writable state.
+        assertDatabaseOutsidePlugin(p.databasePath, pluginRoot());
+        // Create the database parent directory before backend startup so the
+        // bridge can open the file on first write.
+        mkdirSync(dirname(p.databasePath), { recursive: true });
+        // The resolved absolute database path is authoritative; project .env
+        // files may contribute unrelated settings but must not replace it.
+        env.SQLITE_PATH = p.databasePath;
+        env.CODEGRAPH_PROJECT_ID = p.id;
+        if (p.manifestPath) env.CODEGRAPH_PROJECT_FILE = p.manifestPath;
+        cwd = p.projectDir;
+      }
+
+      // The bridge child runs with the project directory as cwd, so its
+      // interpreter/bridge paths must be absolute (or bare command names).
       this.bridge = new CodegraphBridge(
-        this.config.python,
-        this.config.bridgePath,
-        projectEnv,
+        normalizeChildExecutable(this.config.python),
+        normalizeChildExecutable(this.config.bridgePath),
+        env,
+        { cwd },
       );
     }
     await this.bridge.start();
@@ -82,7 +158,8 @@ export class CodegraphRuntime {
   /**
    * Call a bridge method, converting the raw response into a
    * host-neutral `BridgeCallResult`.  `timeoutMs` overrides the default
-   * for `timeoutClass` when given.
+   * for `timeoutClass` when given.  In-flight calls are tracked so
+   * `updateProject` can wait for them before replacing the bridge.
    */
   async call(
     method: string,
@@ -90,8 +167,9 @@ export class CodegraphRuntime {
     timeoutMs?: number,
   ): Promise<BridgeCallResult> {
     const b = await this.ensureBridge();
-    const res = await b.call(method, params, timeoutMs ?? CALL_TIMEOUT_MS);
-    return bridgeResultFromResponse(res, { method });
+    const p = b.call(method, params, timeoutMs ?? CALL_TIMEOUT_MS)
+      .then((res) => bridgeResultFromResponse(res, { method }));
+    return this.track(p);
   }
 
   /**
@@ -211,6 +289,15 @@ export class CodegraphRuntime {
   /** Raw bridge call for the Pi command handler (keeps BridgeResponse). */
   async ping(): Promise<BridgeResponse> {
     const b = await this.ensureBridge();
-    return b.call("ping", {}, 15_000);
+    const p = b.call("ping", {}, 15_000);
+    return this.track(p);
+  }
+
+  /** Track an in-flight bridge promise until it settles. */
+  private track<T>(p: Promise<T>): Promise<T> {
+    this.inFlight.add(p);
+    const done = () => { this.inFlight.delete(p); };
+    p.then(done, done);
+    return p;
   }
 }

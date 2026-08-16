@@ -9,6 +9,8 @@ def handle_stats():
     """Return compact high-level statistics — node/rel counts, description
     coverage, test summary — so agents can troubleshoot without pulling
     thousands of nodes (as ``scope=kind, kind=test`` would)."""
+    import os
+
     from codegraph import get_backend
     from codegraph.constants import NODE_KINDS, PREDICATE_TO_REL_TYPE, TAGS
     from codegraph.models.test import (
@@ -123,6 +125,8 @@ def handle_stats():
         pass
 
     return {
+        "project_id": os.environ.get("CODEGRAPH_PROJECT_ID"),
+        "database_path": _active_backend_database_path(backend),
         "total_nodes": total_nodes,
         "total_relationships": total_relationships,
         "by_kind": by_kind,
@@ -136,3 +140,21 @@ def handle_stats():
         "test_summary": test_summary,
         "memory_summary": memory_summary,
     }
+
+
+def _active_backend_database_path(backend) -> str | None:
+    """Absolute path of the active backend's database (SQLite), or None."""
+    try:
+        cfg = getattr(backend, "_config", None)
+        path = getattr(cfg, "path", None)
+        if isinstance(path, str) and path and path != ":memory:":
+            import os
+            return os.path.abspath(path)
+    except Exception:
+        pass
+    try:
+        import os
+        env_path = (os.environ.get("SQLITE_PATH") or "").strip()
+        return os.path.abspath(env_path) if env_path else None
+    except Exception:
+        return None

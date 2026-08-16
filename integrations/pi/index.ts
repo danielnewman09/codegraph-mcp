@@ -17,11 +17,13 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { existsSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import {
   DEFAULT_VENV, CONFIG_FILE,
 } from "./shared.js";
 import { CodegraphRuntime } from "../../src/core/runtime.js";
-import { resolveConfig, type ConfigOverrides } from "../../src/core/config.js";
+import { dataDir, resolveConfig, type ConfigOverrides } from "../../src/core/config.js";
+import { resolveProjectContext } from "../../src/core/project.js";
 
 // ── Tool modules ───────────────────────────────────────────────────────────
 import { registerQueryTool } from "../../tools/query.js";
@@ -91,7 +93,23 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
       codegraphSource: flagStr("codegraph-source"),
       doxygenIndexSource: flagStr("doxygen-index-source"),
     };
-    return new CodegraphRuntime(resolveConfig(overrides, process.env, process.cwd()));
+    const config = resolveConfig(overrides, process.env, process.cwd());
+    // A Pi session's workspace is its working directory — one root.  A
+    // `.codegraph-project.toml` there selects a multi-repository project;
+    // otherwise resolution falls back to a per-workspace central database.
+    let project = null;
+    try {
+      project = resolveProjectContext({
+        env: process.env,
+        cwd: process.cwd(),
+        workspaceRoots: [{ uri: pathToFileURL(process.cwd()).href }],
+        pluginDataDir: dataDir(process.env),
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      process.stderr.write(`[codegraph] project resolution failed: ${msg}\n`);
+    }
+    return new CodegraphRuntime(config, project ?? undefined);
   }
 
   let runtime: CodegraphRuntime = buildRuntime();

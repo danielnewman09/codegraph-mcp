@@ -5,6 +5,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,6 +43,27 @@ test("bridge call/echo round-trip", async () => {
   const res = await b.call("echo", { hello: "world" }, 5_000);
   assert.equal(res.ok, true);
   assert.deepEqual(res.result, { echoed: { hello: "world" } });
+  await b.stop();
+});
+
+// ── Bridge child cwd ──────────────────────────────────────────────────────
+
+test("bridge spawns the child with an explicit working directory", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cg-bridge-cwd-"));
+  const b = new CodegraphBridge("node", FAKE_BRIDGE, {}, { cwd: dir });
+  await b.start();
+  const res = await b.call("cwd", {}, 5_000);
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.result, { cwd: realpathSync(dir) });
+  await b.stop();
+});
+
+test("bridge without an explicit cwd keeps the parent cwd", async () => {
+  const b = fakeBridge();
+  await b.start();
+  const res = await b.call("cwd", {}, 5_000);
+  assert.equal(res.ok, true);
+  assert.equal((res.result as { cwd: string }).cwd, process.cwd());
   await b.stop();
 });
 

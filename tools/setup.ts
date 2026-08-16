@@ -11,8 +11,9 @@ export function registerSetupTool(pi: ExtensionAPI, runtime: CodegraphRuntime): 
   registerCatalogTool(pi, setupTool, runtime, {
     renderCall(args, _theme, context) {
       const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-      const p = args as { action?: string; project_dir?: string };
-      text.setText(["codegraph_setup", p.action ?? "", p.project_dir ?? ""].filter(Boolean).join("  "));
+      const p = args as { action?: string; project_dir?: string; repository?: string };
+      const target = p.repository ?? p.project_dir ?? "";
+      text.setText(["codegraph_setup", p.action ?? "", target].filter(Boolean).join("  "));
       return text;
     },
   });

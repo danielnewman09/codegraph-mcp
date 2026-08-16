@@ -41,6 +41,8 @@
     "test:mcp": "node --import tsx --test \"tests/mcp/*.test.ts\"",
     "test:pi": "tsx stub.test.ts",
     "bridge:check": "python3 -c \"import ast; ast.parse(open('bridge/codegraph_bridge.py').read()); print('bridge syntax OK')\"",
+    "bridge:test": "python3 -m pytest tests/bridge -q",
+    "bridge:test:venv": "python3 -m pytest tests/bridge -q && /Users/danielnewman/dev/.venv/bin/python -m pytest tests/bridge -q",
     "plugin:validate": "node scripts/validate-plugin.mjs",
     "pack:check": "npm run build && node tests/package/check-pack.mjs"
   },
@@ -48,6 +50,7 @@
     "@earendil-works/pi-ai": "^0.74.0",
     "@earendil-works/pi-tui": "^0.74.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "smol-toml": "^1.8.0",
     "typebox": "^1.1.24"
   },
   "peerDependencies": {

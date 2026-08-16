@@ -43,6 +43,7 @@ export class CodegraphBridge {
     private readonly python: string,
     private readonly bridgePath: string,
     private readonly extraEnv: Record<string, string> = {},
+    private readonly opts: { cwd?: string } = {},
   ) {}
 
   isRunning(): boolean {
@@ -63,6 +64,7 @@ export class CodegraphBridge {
   private async _doStart(): Promise<void> {
     this.dead = false;
     this.proc = spawn(this.python, [this.bridgePath], {
+      cwd: this.opts.cwd,
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, ...this.extraEnv },
     });

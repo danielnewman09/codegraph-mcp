@@ -11,7 +11,7 @@ import { spawn } from "node:child_process";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
-import { FAKE_BRIDGE, MCP_ENTRY, SpawnedStdioTransport, startServer } from "./helpers.js";
+import { FAKE_BRIDGE, MCP_ENTRY, SpawnedStdioTransport, startServer, testPluginData } from "./helpers.js";
 
 const FAKE_ENV = { CODEGRAPH_PYTHON: "node", CODEGRAPH_BRIDGE: FAKE_BRIDGE };
 
@@ -107,7 +107,7 @@ test("MCP: invalid parameters return an error without killing the server", async
 test("MCP: shutdown exits the child process cleanly without hanging", async () => {
   const child = spawn(process.execPath, ["--import", "tsx", MCP_ENTRY], {
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, ...FAKE_ENV },
+    env: { ...process.env, ...FAKE_ENV, PLUGIN_DATA: testPluginData() },
   });
   const transport = new SpawnedStdioTransport(child);
   const client = new Client({ name: "codegraph-test-client", version: "0.0.0" });

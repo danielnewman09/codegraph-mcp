@@ -20,6 +20,12 @@ steer all retrieval *and* setup. A long-lived Python sidecar holds a single
 so repeated fetches, format re-exports, and renders avoid re-initialising
 the backend.
 
+The proposed design for treating a Codex workspace as one logical project
+containing multiple repository sources in a shared SQLite database was
+implemented — see [Multi-Repository Project Database](docs/plans/multi-repository-project-database.md)
+for the plan and [Multi-repository projects](#multi-repository-projects) below
+for how to use it.
+
 ## Tools
 
 The extension exposes **nine** tools. `codegraph_query`, `codegraph_explore`,
@@ -36,11 +42,13 @@ start with `bootstrap_env`; to graph a new project end-to-end, use `bootstrap`.
 | action | requires | does |
 |---|---|---|
 | `bootstrap_env` | — | create/refresh a venv with `codegraph` + `doxygen-index` installed, then restart the bridge under it. Run once per machine. Sources overridable via `codegraph_source` / `doxygen_index_source` (pass a path for an editable install). |
-| `init_config` | `project_dir` | auto-detect language (C++/Python), `input_paths`, `test_paths`, and project name (from `pyproject.toml` or dir name) and write `.doxygen-index.toml`. Override any field; `force` to overwrite. |
-| `index` | `project_dir` | run `doxygen-index` to parse the project and ingest into SQLite (`format: sqlite`, default), write JSON (`format: json`), or explicitly use the deprecated legacy Neo4j backend (`format: neo4j`). |
+| `init_config` | `project_dir` or `repository` | auto-detect language (C++/Python), `input_paths`, `test_paths`, and project name (from `pyproject.toml` or dir name) and write `.doxygen-index.toml`. Override any field; `force` to overwrite. |
+| `index` | `project_dir` or `repository` | run `doxygen-index` to parse a repository and ingest into the shared SQLite database (`format: sqlite`, default), write JSON (`format: json`), or explicitly use the deprecated legacy Neo4j backend (`format: neo4j`). With an active project manifest, pass `repository='<name>'` to resolve the directory + stable source label; `clear=true` replaces **only that source**. |
+| `index_all` | active project manifest | index **every** enabled manifest repository into the shared database, sequentially, replacing only each repository's own source when `clear=true`. Returns a per-repository summary (duration, exit status, post-index node count); a failure of one repo preserves the others. |
 | `db_start` / `db_stop` / `db_restart` / `db_status` | `project_dir` | **Neo4j backend only** — manage the project-local Neo4j Docker container (`neo4j-<project>`, data bind-mounted at `codegraph/neo4j/`) via the `codegraph-db` CLI. |
-| `bootstrap` | `project_dir` | one-shot pipeline: `init_config` → `index` (`db_start` only when `backend='neo4j'`). |
-| `status` | `project_dir?` | health overview: bridge ping, codegraph version, backend reachability (+ SQLite DB file info, or Docker state for Neo4j), available tags + node counts. |
+| `bootstrap` | `project_dir` or `repository` | one-shot pipeline: `init_config` → `index` (`db_start` only when `backend='neo4j'`). |
+| `migrate_database` | `legacy_path` | copy an existing database into the project location with SQLite's backup API (WAL-safe). Refuses to overwrite a populated destination unless `force=true`; always preserves the original and backs up a pre-existing destination as `.pre-migrate`; validates node/edge counts at the destination. |
+| `status` | `project_dir?` | health overview: active project (id, manifest, directory, discovery source), the exact database opened by the backend (path, existence, size, node/relationship counts), per-repository indexed state (enabled/exists/indexed/node count), bridge ping, codegraph version, backend reachability, available tags + node counts. |
 
 Typical first-run workflow:
 
@@ -116,6 +124,101 @@ For a *visual* graph of a test's neighborhood, use `codegraph_query` with
 `scope: neighborhood` and the test's `qualified_name`. `covered_by` is the
 headline query — "which tests cover this class/method?" — and its member
 expansion surfaces tests of every method on a class.
+
+## Multi-repository projects
+
+A Codex workspace can contain several repositories that should be indexed into
+**one** knowledge graph (plus workspace roots that must not be indexed, such as
+a shared `.venv`). A project is declared by `.codegraph-project.toml` in a
+designated anchor directory — the manifest owns the database selection and
+lists the repositories that contribute sources to it:
+
+```toml
+schema_version = 1
+
+[project]
+id = "codegraph-suite"
+database = ".codegraph/codegraph.sqlite3"
+
+[[repositories]]
+name = "codegraph"
+path = ".."
+source = "codegraph"
+
+[[repositories]]
+name = "codegraph-mcp"
+path = "../codegraph-mcp"
+source = "codegraph-mcp"
+
+[[repositories]]
+name = "cpp-sqlite"
+path = "../cpp-sqlite"
+source = "cpp-sqlite"
+
+[[repositories]]
+name = "python-environment"
+path = "../.venv"
+index = false   # never an index target
+```
+
+Rules: `schema_version` must be `1`; `project.id` is required and
+filesystem-safe; `project.database` is resolved against the manifest directory
+(relative or absolute); repository `name`s must be unique, enabled `source`s
+must be unique (defaults to `name`), two entries cannot resolve to the same
+canonical path, and `index` defaults to `true`. A missing repository path
+produces a diagnostic but never blocks read-only access to the database. The
+project database must never resolve inside the installed plugin bundle.
+
+### Project discovery
+
+Resolution precedence, applied **before the Python bridge starts**:
+
+1. `CODEGRAPH_PROJECT_FILE`, when explicitly set.
+2. One manifest discovered from the client's workspace roots (MCP
+   `roots/list`; a Pi session uses its working directory).
+3. An explicitly configured **absolute** `SQLITE_PATH` (backward
+   compatibility).
+4. A central fallback: `<PLUGIN_DATA>/projects/<stable-hash-of-roots>/` —
+   storage isolation keyed on the canonical root set (order-independent), so
+   every fresh task for the same workspace selects the same database even
+   before a manifest exists.
+
+Multiple root manifests produce an actionable ambiguity error before any
+bridge starts. Root-change notifications (`notifications/roots/list_changed`)
+stop the running bridge, re-resolve the project, and start a fresh bridge on
+the next tool call.
+
+All indexing subprocesses for the project receive the same absolute
+`SQLITE_PATH`. The selected repository determines only the subprocess working
+directory, its `.doxygen-index.toml`, the default source label, and
+source-scoped replacement — `clear=true` clears **one source**, never the
+shared database. Every repository keeps its own `.doxygen-index.toml` because
+language, inputs, test paths, and parser settings may differ.
+
+### Indexing repositories
+
+With an active manifest, select a repository by name instead of a raw path:
+
+```json
+{ "action": "index", "repository": "codegraph-mcp", "clear": true }
+```
+
+Conflicting `repository` + `project_dir` / `source` forms are rejected rather
+than silently resolved. Without `repository` or `project_dir`, `index` selects
+the sole enabled repository (or returns a selection error). To index everything:
+
+```json
+{ "action": "index_all", "clear": true }
+```
+
+`index_all` runs repositories sequentially (no concurrent SQLite writers),
+replaces only each repository's own source when `clear=true`, and returns a
+per-repository summary with duration, exit status, and post-index node counts.
+A failure of one repository preserves the ones that succeeded.
+
+`codegraph_setup action='status'` shows the active project (id, manifest,
+directory, discovery source), the exact database the backend opened (path,
+existence, size, node/relationship counts), and per-repository indexed state.
 
 ## Slash command
 

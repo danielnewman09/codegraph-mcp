@@ -47,6 +47,14 @@ function packageRoot(): string {
 /** Bundled bridge script, resolved relative to the package root. */
 export const DEFAULT_BRIDGE = join(packageRoot(), "bridge", "codegraph_bridge.py");
 
+/**
+ * The installed plugin/package root.  This directory is code, not writable
+ * project state — project databases must never resolve inside it.
+ */
+export function pluginRoot(): string {
+  return packageRoot();
+}
+
 /** Package version from the nearest package.json (works in source + dist). */
 export function packageVersion(): string {
   try {

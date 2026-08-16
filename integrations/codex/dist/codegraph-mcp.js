@@ -161,10 +161,10 @@ var require_code = __commonJS({
     function interpolate(x) {
       return typeof x == "number" || typeof x == "boolean" || x === null ? x : safeStringify(Array.isArray(x) ? x.join(",") : x);
     }
-    function stringify(x) {
+    function stringify2(x) {
       return new _Code(safeStringify(x));
     }
-    exports.stringify = stringify;
+    exports.stringify = stringify2;
     function safeStringify(x) {
       return JSON.stringify(x).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
     }
@@ -2984,7 +2984,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve.call(this, root, ref);
+      let _sch = resolve4.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3011,7 +3011,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve(root, ref) {
+    function resolve4(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3638,11 +3638,11 @@ var require_fast_uri = __commonJS({
         normalizeString(uri, options);
       } else if (typeof uri === "object") {
         uri = /** @type {T} */
-        parse3(serialize(uri, options), options);
+        parse4(serialize(uri, options), options);
       }
       return uri;
     }
-    function resolve(baseURI, relativeURI, options) {
+    function resolve4(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const { parsed: baseParsed, malformedAuthorityOrPort: baseMalformed } = parseWithStatus(baseURI, schemelessOptions);
       const { parsed: relativeParsed, malformedAuthorityOrPort: relativeMalformed } = parseWithStatus(relativeURI, schemelessOptions);
@@ -3656,8 +3656,8 @@ var require_fast_uri = __commonJS({
     function resolveComponent(base, relative, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
-        base = parse3(serialize(base, options), options);
-        relative = parse3(serialize(relative, options), options);
+        base = parse4(serialize(base, options), options);
+        relative = parse4(serialize(relative, options), options);
       }
       options = options || {};
       if (!options.tolerant && relative.scheme) {
@@ -3901,7 +3901,7 @@ var require_fast_uri = __commonJS({
       }
       return { parsed, malformedAuthorityOrPort };
     }
-    function parse3(uri, opts) {
+    function parse4(uri, opts) {
       return parseWithStatus(uri, opts).parsed;
     }
     function normalizeString(uri, opts) {
@@ -3926,11 +3926,11 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve,
+      resolve: resolve4,
       resolveComponent,
       equal,
       serialize,
-      parse: parse3
+      parse: parse4
     };
     module.exports = fastUri;
     module.exports.default = fastUri;
@@ -14237,7 +14237,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -14254,7 +14254,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve4, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -14332,7 +14332,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve(parseResult.data);
+            resolve4(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -14593,12 +14593,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve4, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve, interval);
+      const timeoutId = setTimeout(resolve4, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -15474,20 +15474,20 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve) => {
+    return new Promise((resolve4) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve();
+        resolve4();
       } else {
-        this._stdout.once("drain", resolve);
+        this._stdout.once("drain", resolve4);
       }
     });
   }
 };
 
 // src/core/runtime.ts
-import { existsSync as existsSync2 } from "node:fs";
-import { join as join2 } from "node:path";
+import { existsSync as existsSync3, mkdirSync as mkdirSync2 } from "node:fs";
+import { dirname as dirname3, isAbsolute as isAbsolute2, join as join3, resolve as resolve2 } from "node:path";
 
 // src/core/bridge.ts
 import { spawn } from "node:child_process";
@@ -15496,14 +15496,16 @@ var CALL_TIMEOUT_MS = 12e4;
 var SETUP_TIMEOUT_MS = 6e5;
 var WIN = platform() === "win32";
 var CodegraphBridge = class {
-  constructor(python, bridgePath, extraEnv = {}) {
+  constructor(python, bridgePath, extraEnv = {}, opts = {}) {
     this.python = python;
     this.bridgePath = bridgePath;
     this.extraEnv = extraEnv;
+    this.opts = opts;
   }
   python;
   bridgePath;
   extraEnv;
+  opts;
   proc = null;
   seq = 0;
   buffer = "";
@@ -15526,6 +15528,7 @@ var CodegraphBridge = class {
   async _doStart() {
     this.dead = false;
     this.proc = spawn(this.python, [this.bridgePath], {
+      cwd: this.opts.cwd,
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, ...this.extraEnv }
     });
@@ -15589,12 +15592,12 @@ var CodegraphBridge = class {
       return Promise.reject(new Error("codegraph bridge is not running"));
     }
     const id = ++this.seq;
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve4, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`codegraph '${method}' timed out after ${timeoutMs}ms`));
       }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve: resolve4, reject, timer });
       const payload = JSON.stringify({ id, method, params }) + "\n";
       this.proc.stdin.write(payload, (err) => {
         if (err) {
@@ -15646,6 +15649,9 @@ function packageRoot() {
   return __dirname;
 }
 var DEFAULT_BRIDGE = join(packageRoot(), "bridge", "codegraph_bridge.py");
+function pluginRoot() {
+  return packageRoot();
+}
 function packageVersion() {
   try {
     const pkg = JSON.parse(readFileSync(join(packageRoot(), "package.json"), "utf8"));
@@ -15790,7 +15796,7 @@ function venvPresent(venvDir) {
 import { spawn as spawn2 } from "node:child_process";
 function runProcess(opts) {
   const { command, args } = opts;
-  return new Promise((resolve) => {
+  return new Promise((resolve4) => {
     const child = spawn2(command, args, {
       cwd: opts.cwd,
       env: opts.env ? { ...process.env, ...opts.env } : process.env,
@@ -15842,7 +15848,7 @@ function runProcess(opts) {
       settled = true;
       if (timer) clearTimeout(timer);
       opts.signal?.removeEventListener("abort", onAbort);
-      resolve(result);
+      resolve4(result);
     };
     child.on("error", (err) => {
       finish({
@@ -15880,28 +15886,996 @@ function bridgeResultFromResponse(res, details) {
   return { ok: true, text: resultText(res.result), details, raw: res.result };
 }
 
+// src/core/project.ts
+import { createHash } from "node:crypto";
+import { existsSync as existsSync2, readFileSync as readFileSync2, realpathSync } from "node:fs";
+import { basename, dirname as dirname2, isAbsolute, join as join2, resolve, sep } from "node:path";
+
+// node_modules/smol-toml/dist/date.js
+var DATE_TIME_RE = /^(\d{4}-\d{2}-\d{2})?[T ]?(?:(\d{2}):\d{2}(?::\d{2}(?:\.\d+)?)?)?(Z|[-+]\d{2}:\d{2})?$/i;
+var TomlDate = class _TomlDate extends Date {
+  #hasDate = false;
+  #hasTime = false;
+  #offset = null;
+  constructor(date3) {
+    let hasDate = true;
+    let hasTime = true;
+    let offset = "Z";
+    if (typeof date3 === "string") {
+      let match = date3.match(DATE_TIME_RE);
+      if (match) {
+        if (!match[1]) {
+          hasDate = false;
+          date3 = `0000-01-01T${date3}`;
+        }
+        hasTime = !!match[2];
+        hasTime && date3[10] === " " && (date3 = date3.replace(" ", "T"));
+        if (match[2] && +match[2] > 23) {
+          date3 = "";
+        } else {
+          offset = match[3] || null;
+          date3 = date3.toUpperCase();
+          if (!offset && hasTime)
+            date3 += "Z";
+        }
+      } else {
+        date3 = "";
+      }
+    }
+    super(date3);
+    if (!isNaN(this.getTime())) {
+      this.#hasDate = hasDate;
+      this.#hasTime = hasTime;
+      this.#offset = offset;
+    }
+  }
+  isDateTime() {
+    return this.#hasDate && this.#hasTime;
+  }
+  isLocal() {
+    return !this.#hasDate || !this.#hasTime || !this.#offset;
+  }
+  isDate() {
+    return this.#hasDate && !this.#hasTime;
+  }
+  isTime() {
+    return this.#hasTime && !this.#hasDate;
+  }
+  isValid() {
+    return this.#hasDate || this.#hasTime;
+  }
+  toISOString() {
+    let iso = super.toISOString();
+    if (this.isDate())
+      return iso.slice(0, 10);
+    if (this.isTime())
+      return iso.slice(11, 23);
+    if (this.#offset === null)
+      return iso.slice(0, -1);
+    if (this.#offset === "Z")
+      return iso;
+    let offset = +this.#offset.slice(1, 3) * 60 + +this.#offset.slice(4, 6);
+    offset = this.#offset[0] === "-" ? offset : -offset;
+    let offsetDate = new Date(this.getTime() - offset * 6e4);
+    return offsetDate.toISOString().slice(0, -1) + this.#offset;
+  }
+  static wrapAsOffsetDateTime(jsDate, offset = "Z") {
+    let date3 = new _TomlDate(jsDate);
+    date3.#offset = offset;
+    return date3;
+  }
+  static wrapAsLocalDateTime(jsDate) {
+    let date3 = new _TomlDate(jsDate);
+    date3.#offset = null;
+    return date3;
+  }
+  static wrapAsLocalDate(jsDate) {
+    let date3 = new _TomlDate(jsDate);
+    date3.#hasTime = false;
+    date3.#offset = null;
+    return date3;
+  }
+  static wrapAsLocalTime(jsDate) {
+    let date3 = new _TomlDate(jsDate);
+    date3.#hasDate = false;
+    date3.#offset = null;
+    return date3;
+  }
+};
+
+// node_modules/smol-toml/dist/error.js
+function getLineColFromPtr(string3, ptr) {
+  let lines = string3.slice(0, ptr).split(/\r\n|\n|\r/g);
+  return [lines.length, lines.pop().length + 1];
+}
+function makeCodeBlock(string3, line, column) {
+  let lines = string3.split(/\r\n|\n|\r/g);
+  let codeblock = "";
+  let numberLen = (Math.log10(line + 1) | 0) + 1;
+  for (let i = line - 1; i <= line + 1; i++) {
+    let l = lines[i - 1];
+    if (!l)
+      continue;
+    codeblock += i.toString().padEnd(numberLen, " ");
+    codeblock += ":  ";
+    codeblock += l;
+    codeblock += "\n";
+    if (i === line) {
+      codeblock += " ".repeat(numberLen + column + 2);
+      codeblock += "^\n";
+    }
+  }
+  return codeblock;
+}
+var TomlError = class extends Error {
+  line;
+  column;
+  codeblock;
+  constructor(message, options) {
+    const [line, column] = getLineColFromPtr(options.toml, options.ptr);
+    const codeblock = makeCodeBlock(options.toml, line, column);
+    super(`Invalid TOML document: ${message}
+
+${codeblock}`, options);
+    this.line = line;
+    this.column = column;
+    this.codeblock = codeblock;
+  }
+};
+
+// node_modules/smol-toml/dist/util.js
+function indexOfNewline(str, start = 0) {
+  let idx = str.indexOf("\n", start);
+  if (str.charCodeAt(idx - 1) === 13)
+    idx--;
+  return idx;
+}
+function skipComment(ctx) {
+  for (; ctx.p < ctx.s.length; ctx.p++) {
+    let c = ctx.s.charCodeAt(ctx.p);
+    if (c === 10)
+      break;
+    if (c === 13 && ctx.s.charCodeAt(ctx.p + 1) === 10) {
+      ctx.p++;
+      break;
+    }
+    if (c < 32 && c !== 9 || c === 127) {
+      throw new TomlError("control characters are not allowed in comments", {
+        toml: ctx.s,
+        ptr: ctx.p
+      });
+    }
+  }
+}
+function skipVoid(ctx, banNewLines, banComments) {
+  let c;
+  while (1) {
+    while ((c = ctx.s.charCodeAt(ctx.p)) === 32 || c === 9 || !banNewLines && (c === 10 || c === 13 && ctx.s.charCodeAt(ctx.p + 1) === 10))
+      ctx.p++;
+    if (banComments || c !== 35)
+      break;
+    skipComment(ctx);
+  }
+}
+function skipUntil(ctx, sep2, end) {
+  let ptr = ctx.p;
+  if (!end) {
+    ptr = indexOfNewline(ctx.s, ptr);
+    ctx.p = ptr < 0 ? ctx.s.length : ptr;
+    return;
+  }
+  for (; ctx.p < ctx.s.length; ctx.p++) {
+    let c = ctx.s.charCodeAt(ctx.p);
+    if (c === 35) {
+      skipComment(ctx);
+    } else if (c === end || c === sep2) {
+      return;
+    }
+  }
+  throw new TomlError("cannot find end of structure", {
+    toml: ctx.s,
+    ptr
+  });
+}
+
+// node_modules/smol-toml/dist/primitive.js
+var INT_REGEX = /^((0x[0-9a-fA-F](_?[0-9a-fA-F])*)|(([+-]|0[ob])?\d(_?\d)*))$/;
+var FLOAT_REGEX = /^[+-]?\d(_?\d)*(\.\d(_?\d)*)?([eE][+-]?\d(_?\d)*)?$/;
+var LEADING_ZERO = /^[+-]?0[0-9_]/;
+function parseString(ctx) {
+  let start = ctx.p;
+  let c = ctx.s.charCodeAt(ctx.p++);
+  let first = c;
+  let isLiteral = c === 39;
+  let isMultiline = c === ctx.s.charCodeAt(ctx.p) && c === ctx.s.charCodeAt(ctx.p + 1);
+  if (isMultiline) {
+    if ((c = ctx.s.charCodeAt(ctx.p += 2)) === 10)
+      ctx.p++;
+    else if (c === 13 && ctx.s.charCodeAt(ctx.p + 1) === 10)
+      ctx.p += 2;
+  }
+  let parsed = "";
+  let sliceStart = ctx.p;
+  let state = 0;
+  for (; ctx.p < ctx.s.length; ctx.p++) {
+    c = ctx.s.charCodeAt(ctx.p);
+    if (isMultiline && (c === 10 || c === 13 && ctx.s.charCodeAt(ctx.p + 1) === 10)) {
+      state = state && 3;
+    } else if (c < 32 && c !== 9 || c === 127) {
+      throw new TomlError("control characters are not allowed in strings", {
+        toml: ctx.s,
+        ptr: ctx.p
+      });
+    } else if ((!state || state === 3) && c === first && (!isMultiline || ctx.s.charCodeAt(ctx.p + 1) === first && ctx.s.charCodeAt(ctx.p + 2) === first)) {
+      if (isMultiline) {
+        if (ctx.s.charCodeAt(ctx.p + 3) === first)
+          ctx.p++;
+        if (ctx.s.charCodeAt(ctx.p + 3) === first)
+          ctx.p++;
+      }
+      if (!state)
+        parsed += ctx.s.slice(sliceStart, ctx.p);
+      ctx.p += isMultiline ? 3 : 1;
+      return parsed;
+    } else if (!state) {
+      if (!isLiteral && c === 92) {
+        parsed += ctx.s.slice(sliceStart, sliceStart = ctx.p);
+        state = 1;
+      }
+    } else if (state === 1) {
+      if (c === 120 || c === 117 || c === 85) {
+        let value = 0;
+        let len = c === 120 ? 2 : c === 117 ? 4 : 8;
+        for (let j = 0; j < len; j++, ctx.p++) {
+          let hex = ctx.s.charCodeAt(ctx.p + 1);
+          let digit = (
+            /* 0-9 */
+            hex >= 48 && hex <= 57 ? hex - 48 : (
+              /* A-F */
+              hex >= 65 && hex <= 70 ? hex - 65 + 10 : (
+                /* a-f */
+                hex >= 97 && hex <= 102 ? hex - 97 + 10 : -1
+              )
+            )
+          );
+          if (digit < 0)
+            throw new TomlError("invalid non-hex character in unicode escape", { toml: ctx.s, ptr: ctx.p + 1 });
+          value = value << 4 | digit;
+        }
+        if (value < 0 || value > 1114111 || value >= 55296 && value <= 57343) {
+          throw new TomlError("invalid unicode escape", { toml: ctx.s, ptr: ctx.p });
+        }
+        parsed += String.fromCodePoint(value);
+        sliceStart = ctx.p + 1;
+        state = 0;
+      } else if (c === 32 || c === 9) {
+        state = 2;
+      } else {
+        if (c === 98)
+          parsed += "\b";
+        else if (c === 116)
+          parsed += "	";
+        else if (c === 110)
+          parsed += "\n";
+        else if (c === 102)
+          parsed += "\f";
+        else if (c === 114)
+          parsed += "\r";
+        else if (c === 101)
+          parsed += "\x1B";
+        else if (c === 34)
+          parsed += '"';
+        else if (c === 92)
+          parsed += "\\";
+        else
+          throw new TomlError("unrecognized escape sequence", { toml: ctx.s, ptr: ctx.p });
+        sliceStart = ctx.p + 1;
+        state = 0;
+      }
+    } else if (c !== 32 && c !== 9) {
+      if (state === 2) {
+        throw new TomlError("invalid escape: only line-ending whitespace may be escaped", {
+          toml: ctx.s,
+          ptr: sliceStart
+        });
+      }
+      state = !isLiteral && c === 92 ? 1 : 0;
+      sliceStart = ctx.p;
+    }
+  }
+  throw new TomlError("unfinished string", { toml: ctx.s, ptr: start });
+}
+function sliceAndTrimEndOf(ctx, start, end) {
+  let value = ctx.s.slice(start, end);
+  let commentIdx = value.indexOf("#");
+  if (commentIdx > 0) {
+    skipComment({ s: value, p: commentIdx, d: 0 });
+    value = value.slice(0, commentIdx);
+  }
+  return value.trimEnd();
+}
+function parseValue(ctx, integersAsBigInt, end) {
+  let ptr = ctx.p;
+  let err = { toml: ctx.s, ptr };
+  skipUntil(ctx, 44, end);
+  let value = sliceAndTrimEndOf(ctx, ptr, ctx.p);
+  if (!value)
+    throw new TomlError("incomplete declaration: value expected", err);
+  if (value === "-inf")
+    return -Infinity;
+  if (value === "inf" || value === "+inf")
+    return Infinity;
+  if (value === "nan" || value === "+nan" || value === "-nan")
+    return NaN;
+  if (value === "-0")
+    return integersAsBigInt ? 0n : 0;
+  let isInt = INT_REGEX.test(value);
+  if (isInt || FLOAT_REGEX.test(value)) {
+    if (LEADING_ZERO.test(value)) {
+      throw new TomlError("leading zeroes are not allowed", err);
+    }
+    value = value.replace(/_/g, "");
+    let numeric = +value;
+    if (isNaN(numeric)) {
+      throw new TomlError("invalid number", err);
+    }
+    if (isInt) {
+      if ((isInt = !Number.isSafeInteger(numeric)) && !integersAsBigInt) {
+        throw new TomlError("integer value cannot be represented losslessly", err);
+      }
+      if (isInt || integersAsBigInt === true)
+        numeric = BigInt(value);
+    }
+    return numeric;
+  }
+  const date3 = new TomlDate(value);
+  if (!date3.isValid())
+    throw new TomlError("invalid value", err);
+  return date3;
+}
+
+// node_modules/smol-toml/dist/extract.js
+function extractValue(ctx, end, integersAsBigInt) {
+  let ptr = ctx.p;
+  let c = ctx.s.charCodeAt(ptr);
+  if (c === 91 || c === 123) {
+    if (!ctx.d--) {
+      throw new TomlError("document contains excessively nested structures. aborting.", {
+        toml: ctx.s,
+        ptr
+      });
+    }
+    let value = c === 91 ? parseArray(ctx, integersAsBigInt) : parseInlineTable(ctx, integersAsBigInt);
+    ctx.d++;
+    return value;
+  }
+  if (c === 34 || c === 39) {
+    return parseString(ctx);
+  }
+  if (c === 116) {
+    if (ctx.s.charCodeAt(++ctx.p) !== 114 || ctx.s.charCodeAt(++ctx.p) !== 117 || ctx.s.charCodeAt(++ctx.p) !== 101)
+      throw new TomlError("invalid value", { toml: ctx.s, ptr });
+    ctx.p++;
+    return true;
+  }
+  if (c === 102) {
+    if (ctx.s.charCodeAt(++ctx.p) !== 97 || ctx.s.charCodeAt(++ctx.p) !== 108 || ctx.s.charCodeAt(++ctx.p) !== 115 || ctx.s.charCodeAt(++ctx.p) !== 101)
+      throw new TomlError("invalid value", { toml: ctx.s, ptr });
+    ctx.p++;
+    return false;
+  }
+  return parseValue(ctx, integersAsBigInt, end);
+}
+
+// node_modules/smol-toml/dist/struct.js
+var KEY_PART_RE = /^[a-zA-Z0-9-_]+[ \t]*$/;
+function parseKey(ctx, end = "=") {
+  let start = ctx.p;
+  let dot = start - 1;
+  let parsed = [];
+  let endPtr = ctx.s.indexOf(end, start);
+  if (endPtr < 0) {
+    throw new TomlError("incomplete key-value: cannot find end of key", {
+      toml: ctx.s,
+      ptr: start
+    });
+  }
+  do {
+    let c = ctx.s.charCodeAt(ctx.p = ++dot);
+    if (c !== 32 && c !== 9) {
+      if (c === 34 || c === 39) {
+        if (c === ctx.s.charCodeAt(ctx.p + 1) && c === ctx.s.charCodeAt(ctx.p + 2)) {
+          throw new TomlError("multiline strings are not allowed in keys", {
+            toml: ctx.s,
+            ptr: ctx.p
+          });
+        }
+        let part = parseString(ctx);
+        dot = ctx.s.indexOf(".", ctx.p);
+        let strEnd = ctx.s.slice(ctx.p, dot < 0 || dot > endPtr ? endPtr : dot);
+        let newLine = indexOfNewline(strEnd);
+        if (newLine > -1) {
+          throw new TomlError("newlines are not allowed in keys", {
+            toml: ctx.s,
+            ptr: newLine
+          });
+        }
+        if (strEnd.trimStart()) {
+          throw new TomlError("found extra tokens after the string part", {
+            toml: ctx.s,
+            ptr: ctx.p
+          });
+        }
+        if (endPtr < ctx.p) {
+          endPtr = ctx.s.indexOf(end, ctx.p);
+          if (endPtr < 0) {
+            throw new TomlError("incomplete key-value: cannot find end of key", {
+              toml: ctx.s,
+              ptr: start
+            });
+          }
+        }
+        parsed.push(part);
+      } else {
+        dot = ctx.s.indexOf(".", ctx.p);
+        let part = ctx.s.slice(ctx.p, dot < 0 || dot > endPtr ? endPtr : dot);
+        if (!KEY_PART_RE.test(part)) {
+          throw new TomlError("only letter, numbers, dashes and underscores are allowed in keys", {
+            toml: ctx.s,
+            ptr: ctx.p
+          });
+        }
+        parsed.push(part.trimEnd());
+      }
+    }
+  } while (dot + 1 && dot < endPtr);
+  ctx.p = endPtr + 1;
+  skipVoid(ctx, true, true);
+  return parsed;
+}
+function parseInlineTable(ctx, integersAsBigInt) {
+  let res = {};
+  let seen = /* @__PURE__ */ new Set();
+  let c;
+  ctx.p++;
+  while (ctx.p < ctx.s.length) {
+    skipVoid(ctx);
+    if ((c = ctx.s.charCodeAt(ctx.p)) === 125) {
+      ctx.p++;
+      return res;
+    }
+    let k;
+    let t = res;
+    let hasOwn = false;
+    let p = ctx.p;
+    let key = parseKey(ctx);
+    for (let i = 0; i < key.length; i++) {
+      if (i)
+        t = hasOwn ? t[k] : t[k] = {};
+      k = key[i];
+      if ((hasOwn = Object.hasOwn(t, k)) && (typeof t[k] !== "object" || seen.has(t[k]))) {
+        throw new TomlError("trying to redefine an already defined value", {
+          toml: ctx.s,
+          ptr: p
+        });
+      }
+      if (!hasOwn && k === "__proto__") {
+        Object.defineProperty(t, k, { enumerable: true, configurable: true, writable: true });
+      }
+    }
+    if (hasOwn) {
+      throw new TomlError("trying to redefine an already defined value", {
+        toml: ctx.s,
+        ptr: ctx.p
+      });
+    }
+    let value = extractValue(ctx, 125, integersAsBigInt);
+    seen.add(t[k] = value);
+    skipVoid(ctx);
+    if ((c = ctx.s.charCodeAt(ctx.p++)) === 125) {
+      return res;
+    }
+    if (c !== 44) {
+      throw new TomlError("expected comma or end of structure", { toml: ctx.s, ptr: ctx.p - 1 });
+    }
+  }
+  throw new TomlError("unfinished table encountered", {
+    toml: ctx.s,
+    ptr: ctx.p
+  });
+}
+function parseArray(ctx, integersAsBigInt) {
+  let res = [];
+  let c;
+  ctx.p++;
+  while (ctx.p < ctx.s.length) {
+    skipVoid(ctx);
+    if ((c = ctx.s.charCodeAt(ctx.p)) === 93) {
+      ctx.p++;
+      return res;
+    }
+    res.push(extractValue(ctx, 93, integersAsBigInt));
+    skipVoid(ctx);
+    if ((c = ctx.s.charCodeAt(ctx.p++)) === 93) {
+      return res;
+    }
+    if (c !== 44) {
+      throw new TomlError("expected comma or end of structure", { toml: ctx.s, ptr: ctx.p - 1 });
+    }
+  }
+  throw new TomlError("unfinished array encountered", {
+    toml: ctx.s,
+    ptr: ctx.p
+  });
+}
+
+// node_modules/smol-toml/dist/parse.js
+function peekTable(key, table, meta2, type) {
+  let t = table;
+  let m = meta2;
+  let k;
+  let hasOwn = false;
+  let state;
+  for (let i = 0; i < key.length; i++) {
+    if (i) {
+      t = hasOwn ? t[k] : t[k] = {};
+      m = (state = m[k]).c;
+      if (type === 0 && (state.t === 1 || state.t === 2)) {
+        return null;
+      }
+      if (state.t === 2) {
+        let l = t.length - 1;
+        t = t[l];
+        m = m[l].c;
+      }
+    }
+    k = key[i];
+    if ((hasOwn = Object.hasOwn(t, k)) && m[k]?.t === 0 && m[k]?.d) {
+      return null;
+    }
+    if (!hasOwn) {
+      if (k === "__proto__") {
+        Object.defineProperty(t, k, { enumerable: true, configurable: true, writable: true });
+        Object.defineProperty(m, k, { enumerable: true, configurable: true, writable: true });
+      }
+      m[k] = {
+        t: i < key.length - 1 && type === 2 ? 3 : type,
+        d: false,
+        i: 0,
+        c: {}
+      };
+    }
+  }
+  state = m[k];
+  if (state.t !== type && !(type === 1 && state.t === 3)) {
+    return null;
+  }
+  if (type === 2) {
+    if (!state.d) {
+      state.d = true;
+      t[k] = [];
+    }
+    t[k].push(t = {});
+    state.c[state.i++] = state = { t: 1, d: false, i: 0, c: {} };
+  }
+  if (state.d) {
+    return null;
+  }
+  state.d = true;
+  if (type === 1) {
+    t = hasOwn ? t[k] : t[k] = {};
+  } else if (type === 0 && hasOwn) {
+    return null;
+  }
+  return [k, t, state.c];
+}
+function parse3(toml, { maxDepth = 1e3, integersAsBigInt } = {}) {
+  let ctx = { s: toml, p: 0, d: maxDepth };
+  let res = {};
+  let meta2 = {};
+  let tmp;
+  let tbl = res;
+  let m = meta2;
+  skipVoid(ctx);
+  while (ctx.p < toml.length) {
+    if (toml.charCodeAt(ctx.p) === 91) {
+      let isTableArray = toml.charCodeAt(++ctx.p) === 91;
+      tmp = ctx.p += +isTableArray;
+      let k = parseKey(ctx, "]");
+      if (isTableArray) {
+        if (toml.charCodeAt(ctx.p - 1) !== 93) {
+          throw new TomlError("expected end of table declaration", {
+            toml,
+            ptr: ctx.p - 1
+          });
+        }
+        ctx.p++;
+      }
+      let p = peekTable(
+        k,
+        res,
+        meta2,
+        isTableArray ? 2 : 1
+        /* Type.EXPLICIT */
+      );
+      if (!p) {
+        throw new TomlError("trying to redefine an already defined table or value", {
+          toml,
+          ptr: tmp
+        });
+      }
+      m = p[2];
+      tbl = p[1];
+    } else {
+      tmp = ctx.p;
+      let k = parseKey(ctx);
+      let p = peekTable(
+        k,
+        tbl,
+        m,
+        0
+        /* Type.DOTTED */
+      );
+      if (!p) {
+        throw new TomlError("trying to redefine an already defined table or value", {
+          toml,
+          ptr: tmp
+        });
+      }
+      p[1][p[0]] = extractValue(ctx, void 0, integersAsBigInt);
+    }
+    skipVoid(ctx, true);
+    if (ctx.p < toml.length && (tmp = toml.charCodeAt(ctx.p)) !== 10 && tmp !== 13) {
+      throw new TomlError("each key-value declaration must be followed by an end-of-line", {
+        toml,
+        ptr: ctx.p
+      });
+    }
+    skipVoid(ctx);
+  }
+  return res;
+}
+
+// src/core/project.ts
+var ProjectError = class extends Error {
+};
+function workspaceFallbackKey(rootPaths) {
+  const sorted = [...rootPaths].sort();
+  return createHash("sha256").update(sorted.join("\n")).digest("hex").slice(0, 16);
+}
+var PROJECT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+function canonicalize(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    let dir = dirname2(p);
+    let base = basename(p);
+    try {
+      dir = realpathSync(dir);
+    } catch {
+      return resolve(p);
+    }
+    return join2(dir, base);
+  }
+}
+function rootPathFromUri(uri) {
+  if (uri.startsWith("file://")) {
+    try {
+      return decodeURIComponent(new URL(uri).pathname);
+    } catch {
+      return uri;
+    }
+  }
+  return uri;
+}
+function isRecord(v) {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+function parseProjectManifest(text, manifestPath) {
+  let raw;
+  try {
+    raw = parse3(text);
+  } catch (e) {
+    throw new ProjectError(
+      `Invalid TOML in ${manifestPath}: ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+  if (!isRecord(raw)) {
+    throw new ProjectError(`Manifest ${manifestPath} must be a TOML table`);
+  }
+  const schemaVersion = raw["schema_version"];
+  if (typeof schemaVersion !== "number" || schemaVersion !== 1) {
+    throw new ProjectError(
+      `Manifest ${manifestPath}: unsupported schema_version ${JSON.stringify(schemaVersion)} (expected 1)`
+    );
+  }
+  const proj = raw["project"];
+  if (!isRecord(proj)) {
+    throw new ProjectError(`Manifest ${manifestPath}: missing [project] table`);
+  }
+  const id = proj["id"];
+  if (typeof id !== "string" || !id.trim()) {
+    throw new ProjectError(`Manifest ${manifestPath}: project.id is required`);
+  }
+  if (!PROJECT_ID_RE.test(id)) {
+    throw new ProjectError(
+      `Manifest ${manifestPath}: project.id ${JSON.stringify(id)} is not filesystem-safe (use letters, digits, '.', '_', '-'; must not start with '.')`
+    );
+  }
+  const database = proj["database"];
+  if (typeof database !== "string" || !database.trim()) {
+    throw new ProjectError(`Manifest ${manifestPath}: project.database is required`);
+  }
+  const rawRepos = raw["repositories"];
+  if (rawRepos !== void 0 && !Array.isArray(rawRepos)) {
+    throw new ProjectError(`Manifest ${manifestPath}: repositories must be an array`);
+  }
+  const repos = [];
+  const names = /* @__PURE__ */ new Set();
+  const sources = /* @__PURE__ */ new Set();
+  const canonicalPaths = /* @__PURE__ */ new Map();
+  for (const [i, entry] of (rawRepos ?? []).entries()) {
+    if (!isRecord(entry)) {
+      throw new ProjectError(`Manifest ${manifestPath}: repositories[${i}] must be a table`);
+    }
+    const name = entry["name"];
+    if (typeof name !== "string" || !name.trim()) {
+      throw new ProjectError(`Manifest ${manifestPath}: repositories[${i}] name is required`);
+    }
+    if (names.has(name)) {
+      throw new ProjectError(`Manifest ${manifestPath}: duplicate repository name '${name}'`);
+    }
+    names.add(name);
+    const path = entry["path"];
+    if (typeof path !== "string" || !path.trim()) {
+      throw new ProjectError(`Manifest ${manifestPath}: repository '${name}' path is required`);
+    }
+    let source = entry["source"];
+    if (source !== void 0 && (typeof source !== "string" || !source.trim())) {
+      throw new ProjectError(`Manifest ${manifestPath}: repository '${name}' source must be a string`);
+    }
+    source = source || name;
+    const indexRaw = entry["index"];
+    const index = indexRaw === void 0 ? true : indexRaw;
+    if (typeof index !== "boolean") {
+      throw new ProjectError(`Manifest ${manifestPath}: repository '${name}' index must be a boolean`);
+    }
+    if (index) {
+      if (sources.has(source)) {
+        throw new ProjectError(
+          `Manifest ${manifestPath}: duplicate enabled source '${source}' (repository '${name}')`
+        );
+      }
+      sources.add(source);
+    }
+    repos.push({ name, source, path, index });
+  }
+  const manifestDir = canonicalize(dirname2(manifestPath));
+  for (const r of repos) {
+    const abs = isAbsolute(r.path) ? r.path : resolve(manifestDir, r.path);
+    const canon = canonicalize(abs);
+    const owner = canonicalPaths.get(canon);
+    if (owner !== void 0) {
+      throw new ProjectError(
+        `Manifest ${manifestPath}: repositories '${owner}' and '${r.name}' resolve to the same path ${canon}`
+      );
+    }
+    canonicalPaths.set(canon, r.name);
+  }
+  return {
+    schemaVersion,
+    id,
+    database,
+    repositories: repos,
+    manifestDir
+  };
+}
+function loadProjectManifest(manifestPath) {
+  const abs = resolve(manifestPath);
+  if (!existsSync2(abs)) {
+    throw new ProjectError(`Project manifest not found: ${abs}`);
+  }
+  let text;
+  try {
+    text = readFileSync2(abs, "utf8");
+  } catch (e) {
+    throw new ProjectError(`Cannot read ${abs}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return parseProjectManifest(text, abs);
+}
+function repoExists(p) {
+  return existsSync2(p);
+}
+function projectContextFromManifest(manifest, discoverySource) {
+  const dbAbs = isAbsolute(manifest.database) ? manifest.database : resolve(manifest.manifestDir, manifest.database);
+  const databasePath = canonicalize(dbAbs);
+  const repositories = manifest.repositories.map((r) => {
+    const abs = isAbsolute(r.path) ? r.path : resolve(manifest.manifestDir, r.path);
+    const path = canonicalize(abs);
+    return {
+      name: r.name,
+      source: r.source,
+      path,
+      index: r.index,
+      exists: repoExists(path)
+    };
+  });
+  return {
+    id: manifest.id,
+    manifestPath: join2(manifest.manifestDir, ".codegraph-project.toml"),
+    projectDir: manifest.manifestDir,
+    databasePath,
+    repositories,
+    discoverySource
+  };
+}
+function projectContextFromSqlitePath(sqlitePath, cwd) {
+  const databasePath = canonicalize(sqlitePath);
+  const digest = createHash("sha256").update(databasePath).digest("hex").slice(0, 16);
+  return {
+    id: `legacy-${digest}`,
+    projectDir: cwd,
+    databasePath,
+    repositories: [],
+    discoverySource: "absolute-sqlite"
+  };
+}
+function projectContextFromFallback(rootPaths, pluginDataDir, cwd) {
+  const key = workspaceFallbackKey(rootPaths);
+  const projectDir = rootPaths[0] ? rootPaths[0] : canonicalize(cwd);
+  const databasePath = canonicalize(join2(pluginDataDir, "projects", key, "codegraph.sqlite3"));
+  return {
+    id: `workspace-${key}`,
+    projectDir,
+    databasePath,
+    repositories: [],
+    discoverySource: "fallback"
+  };
+}
+function isPathInside(p, root) {
+  const r = root.endsWith(sep) ? root : root + sep;
+  return p === root || p.startsWith(r);
+}
+function assertDatabaseOutsidePlugin(databasePath, pluginRoot2) {
+  if (!pluginRoot2) return;
+  const db = canonicalize(databasePath);
+  const root = canonicalize(pluginRoot2);
+  if (isPathInside(db, root)) {
+    throw new ProjectError(
+      `Project database ${db} resolves inside the installed plugin bundle (${root}). The plugin directory is code, not writable project state \u2014 point the project manifest's database (or SQLITE_PATH) elsewhere.`
+    );
+  }
+}
+function discoverManifestInRoots(roots) {
+  const found = [];
+  for (const root of roots) {
+    const dir = rootPathFromUri(root.uri);
+    if (!dir) continue;
+    const cand = join2(dir, ".codegraph-project.toml");
+    if (existsSync2(cand)) {
+      const canon = canonicalize(cand);
+      if (!found.includes(canon)) found.push(canon);
+    }
+  }
+  return found;
+}
+function resolveProjectContext(opts = {}) {
+  const env = opts.env ?? process.env;
+  const cwd = opts.cwd ?? process.cwd();
+  const roots = opts.workspaceRoots ?? [];
+  const pluginDataDir = opts.pluginDataDir;
+  const pluginRoot2 = opts.pluginRoot;
+  const explicitFile = env.CODEGRAPH_PROJECT_FILE?.trim();
+  if (explicitFile) {
+    const manifest = loadProjectManifest(explicitFile);
+    const ctx2 = projectContextFromManifest(manifest, "explicit");
+    if (pluginRoot2) assertDatabaseOutsidePlugin(ctx2.databasePath, pluginRoot2);
+    return ctx2;
+  }
+  const discovered = discoverManifestInRoots(roots);
+  if (discovered.length > 1) {
+    throw new ProjectError(
+      `Ambiguous project: multiple .codegraph-project.toml manifests found in workspace roots: ` + discovered.map((d) => `
+  - ${d}`).join("") + `
+Set CODEGRAPH_PROJECT_FILE to select one explicitly.`
+    );
+  }
+  if (discovered.length === 1) {
+    const manifest = loadProjectManifest(discovered[0]);
+    const ctx2 = projectContextFromManifest(manifest, "mcp-roots");
+    if (pluginRoot2) assertDatabaseOutsidePlugin(ctx2.databasePath, pluginRoot2);
+    return ctx2;
+  }
+  const sqlitePath = env.SQLITE_PATH?.trim();
+  if (sqlitePath && isAbsolute(sqlitePath)) {
+    const ctx2 = projectContextFromSqlitePath(sqlitePath, cwd);
+    if (pluginRoot2) assertDatabaseOutsidePlugin(ctx2.databasePath, pluginRoot2);
+    return ctx2;
+  }
+  const rootPaths = [...new Set(
+    roots.map((r) => rootPathFromUri(r.uri)).filter(Boolean).map((p) => canonicalize(p))
+  )].sort();
+  const ctx = projectContextFromFallback(rootPaths, pluginDataDir ?? cwd, cwd);
+  if (pluginRoot2) assertDatabaseOutsidePlugin(ctx.databasePath, pluginRoot2);
+  return ctx;
+}
+
 // src/core/runtime.ts
 var DEFAULT_TIMEOUTS = {
   normal: CALL_TIMEOUT_MS,
   setup: SETUP_TIMEOUT_MS,
   agent: SETUP_TIMEOUT_MS
 };
+function normalizeChildExecutable(p) {
+  if (isAbsolute2(p)) return p;
+  if (p.includes("/") || p.includes("\\")) return resolve2(p);
+  return p;
+}
 var CodegraphRuntime = class {
   config;
   bridge = null;
-  constructor(config2) {
+  _project = null;
+  /** In-flight bridge calls started through this runtime. */
+  inFlight = /* @__PURE__ */ new Set();
+  constructor(config2, project) {
     this.config = config2;
+    this._project = project ?? null;
+  }
+  /** The resolved project context (manifest / SQLITE_PATH / fallback). */
+  get project() {
+    return this._project;
+  }
+  /**
+   * Swap the active project.  Waits for in-flight bridge calls to settle
+   * first, then stops the bridge so the new project's database/environment
+   * is picked up on the next call — we never switch a bridge with active
+   * work (which would kill an in-progress index or migration).
+   */
+  async updateProject(project) {
+    await this.waitForIdle();
+    await this.stopBridge();
+    this._project = project;
+  }
+  /**
+   * Wait until no bridge calls are in flight.  Calls carry their own
+   * timeouts, so this settles naturally; a hard cap only guards against a
+   * pathological stuck caller.
+   */
+  async waitForIdle(capMs = 6e5) {
+    const started = Date.now();
+    while (this.inFlight.size > 0) {
+      if (Date.now() - started > capMs) {
+        process.stderr.write(
+          `[codegraph] updateProject: giving up after ${capMs}ms waiting for active bridge calls \u2014 replacing the bridge anyway
+`
+        );
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
   }
   // ── Bridge lifecycle ───────────────────────────────────────────
   /** Start the bridge once and keep it for the process lifetime. */
   async ensureBridge() {
     if (this.bridge && this.bridge.isRunning()) return this.bridge;
     if (!this.bridge) {
-      const projectEnv = loadEnvFile(join2(this.config.cwd, ".env"));
+      const projectEnv = loadEnvFile(join3(this.config.cwd, ".env"));
+      const env = { ...projectEnv };
+      let cwd = this.config.cwd;
+      if (this._project) {
+        const p = this._project;
+        assertDatabaseOutsidePlugin(p.databasePath, pluginRoot());
+        mkdirSync2(dirname3(p.databasePath), { recursive: true });
+        env.SQLITE_PATH = p.databasePath;
+        env.CODEGRAPH_PROJECT_ID = p.id;
+        if (p.manifestPath) env.CODEGRAPH_PROJECT_FILE = p.manifestPath;
+        cwd = p.projectDir;
+      }
       this.bridge = new CodegraphBridge(
-        this.config.python,
-        this.config.bridgePath,
-        projectEnv
+        normalizeChildExecutable(this.config.python),
+        normalizeChildExecutable(this.config.bridgePath),
+        env,
+        { cwd }
       );
     }
     await this.bridge.start();
@@ -15923,12 +16897,13 @@ var CodegraphRuntime = class {
   /**
    * Call a bridge method, converting the raw response into a
    * host-neutral `BridgeCallResult`.  `timeoutMs` overrides the default
-   * for `timeoutClass` when given.
+   * for `timeoutClass` when given.  In-flight calls are tracked so
+   * `updateProject` can wait for them before replacing the bridge.
    */
   async call(method, params, timeoutMs) {
     const b = await this.ensureBridge();
-    const res = await b.call(method, params, timeoutMs ?? CALL_TIMEOUT_MS);
-    return bridgeResultFromResponse(res, { method });
+    const p = b.call(method, params, timeoutMs ?? CALL_TIMEOUT_MS).then((res) => bridgeResultFromResponse(res, { method }));
+    return this.track(p);
   }
   /**
    * Call a bridge method by timeout class (used by the tool catalog).
@@ -15958,7 +16933,7 @@ var CodegraphRuntime = class {
   // ── bootstrap_env ──────────────────────────────────────────────
   /** pip spec: local path → editable install, otherwise the spec. */
   pipSpec(spec) {
-    return existsSync2(spec) ? ["-e", spec] : [spec];
+    return existsSync3(spec) ? ["-e", spec] : [spec];
   }
   /**
    * Provision (or refresh) the bootstrapped venv with codegraph +
@@ -16030,7 +17005,17 @@ var CodegraphRuntime = class {
   /** Raw bridge call for the Pi command handler (keeps BridgeResponse). */
   async ping() {
     const b = await this.ensureBridge();
-    return b.call("ping", {}, 15e3);
+    const p = b.call("ping", {}, 15e3);
+    return this.track(p);
+  }
+  /** Track an in-flight bridge promise until it settles. */
+  track(p) {
+    this.inFlight.add(p);
+    const done = () => {
+      this.inFlight.delete(p);
+    };
+    p.then(done, done);
+    return p;
   }
 };
 
@@ -20321,6 +21306,9 @@ __export(typebox_exports, {
   With: () => With2
 });
 
+// src/core/tool-catalog.ts
+import { resolve as resolve3 } from "node:path";
+
 // src/core/paths.ts
 import { execFile } from "node:child_process";
 import { platform as platform3 } from "node:os";
@@ -20338,12 +21326,12 @@ async function openPath(target) {
     cmd = "xdg-open";
     args = [target];
   }
-  await new Promise((resolve, reject) => {
+  await new Promise((resolve4, reject) => {
     execFile(cmd, args, { timeout: 15e3 }, (err, _stdout, stderr) => {
       if (err) {
         reject(new Error(stderr || `Failed to open ${target} (${err.message})`));
       } else {
-        resolve();
+        resolve4();
       }
     });
   });
@@ -20625,27 +21613,40 @@ var statsTool = {
 var setupTool = {
   name: "codegraph_setup",
   label: "Codegraph Setup",
-  description: "Bootstrap and operate the codegraph knowledge graph for a project: provision the Python environment, generate the `.doxygen-index.toml` config from the repo's contents, and index source code into the active backend (SQLite by default \u2014 a plain file, no Docker; pass backend='neo4j' to opt into the project-local Neo4j Docker container). Use the `action` field to steer: 'bootstrap_env' (create/refresh a venv with codegraph + doxygen-index installed \u2014 run this first on a new machine), 'init_config' (auto-detect language/inputs/tests and write `.doxygen-index.toml`), 'index' (parse the project and ingest into SQLite (the default), the deprecated legacy Neo4j backend, or JSON; clear defaults to false so it won't wipe existing data \u2014 pass clear=true to replace a source), 'db_start'/'db_stop'/'db_restart'/'db_status' (Neo4j backend only: manage the Docker container), 'db_backup' (Neo4j backend only: create a dump or tar backup \u2014 container is briefly stopped), 'db_restore' (Neo4j backend only: restore from a backup file \u2014 WARNING: destroys current data, safety backup created first), 'db_backups' (list available backup files with size and timestamp), 'bootstrap' (one-shot: init_config \u2192 index, with clear=true; db_start only for the deprecated backend='neo4j'), or 'status' (bridge + backend + tags health).",
-  promptSnippet: "Provision env, create .doxygen-index.toml, and index a project into the codegraph (SQLite by default, Neo4j optional)",
+  description: "Bootstrap and operate the codegraph knowledge graph for a project: provision the Python environment, generate the `.doxygen-index.toml` config from the repo's contents, and index source code into the active backend (SQLite by default \u2014 a plain file, no Docker; pass backend='neo4j' to opt into the project-local Neo4j Docker container). Use the `action` field to steer: 'bootstrap_env' (create/refresh a venv with codegraph + doxygen-index installed \u2014 run this first on a new machine), 'init_config' (auto-detect language/inputs/tests and write `.doxygen-index.toml`), 'index' (parse a repository and ingest it into SQLite (the default), the deprecated legacy Neo4j backend, or JSON; clear defaults to false so it won't wipe existing data \u2014 pass clear=true to replace just that source), 'index_all' (index every enabled repository from the active .codegraph-project.toml manifest into the shared database, sequentially, replacing only each repo's own source when clear=true), 'db_start'/'db_stop'/'db_restart'/'db_status' (Neo4j backend only: manage the Docker container), 'db_backup' (Neo4j backend only: create a dump or tar backup \u2014 container is briefly stopped), 'db_restore' (Neo4j backend only: restore from a backup file \u2014 WARNING: destroys current data, safety backup created first), 'db_backups' (list available backup files with size and timestamp), 'bootstrap' (one-shot: init_config \u2192 index, with clear=true; db_start only for the deprecated backend='neo4j'), 'migrate_database' (copy an existing database into the project location with SQLite's backup API \u2014 refuses to overwrite a populated destination without force=true, preserves the originals, validates counts), or 'status' (project + database + repositories + bridge health).",
+  promptSnippet: "Provision env, create .doxygen-index.toml, and index repositories into the codegraph (SQLite by default, Neo4j optional)",
   promptGuidelines: [
-    "DESTRUCTIVE: action='index' and action='bootstrap' re-index a project and can REPLACE existing graph data for that source. Only run them when the user EXPLICITLY asks to (re)index or bootstrap a project \u2014 never as a shortcut to 'explore' or 'set up the graph' when asked to read or understand code.",
+    "DESTRUCTIVE: action='index' and action='bootstrap' re-index a repository and can REPLACE existing graph data for that source. Only run them when the user EXPLICITLY asks to (re)index or bootstrap \u2014 never as a shortcut to 'explore' or 'set up the graph' when asked to read or understand code.",
+    "When a .codegraph-project.toml manifest is active, pass `repository` (manifest name) instead of `project_dir` \u2014 the directory, source label, and shared database are resolved from the manifest. Rejecting mixed arguments is intentional: pass one form only.",
+    "Use action='index_all' to index every enabled manifest repository into the shared database. It runs repositories sequentially; a failure of one repo preserves the others' successfully indexed sources and returns a per-repository summary.",
+    "Use action='migrate_database' with legacy_path to move an existing database into the project location (SQLite backup API, WAL-safe). It refuses to overwrite a populated destination unless force=true, and always preserves the original files.",
     "On a fresh machine, call codegraph_setup action='bootstrap_env' once before anything else \u2014 it creates a venv with codegraph + doxygen-index.",
     "The default backend is SQLite (a plain file \u2014 no Docker, no container to manage). Neo4j is a deprecated legacy backend; only use db_* actions and backend='neo4j' when explicitly requested.",
     "Use action='db_backup' (Neo4j backend only) to create a backup before risky operations like re-indexing with clear=true. Pass mode='tar' for speed or mode='dump' (default) for portability.",
     "Use action='db_backups' to list available backup files before restoring.",
     "DESTRUCTIVE: action='db_restore' replaces the entire database from a backup file. A safety backup is created automatically first. Only run when the user explicitly asks to restore.",
-    "To graph a new project end-to-end: codegraph_setup action='bootstrap' with project_dir \u2014 it writes the config and indexes (Docker/Neo4j only when backend='neo4j').",
+    "To graph a new project end-to-end: codegraph_setup action='bootstrap' with project_dir (or repository) \u2014 it writes the config and indexes (Docker/Neo4j only when backend='neo4j').",
     "Use action='init_config' to generate/refresh `.doxygen-index.toml` from a repo (auto-detects C++ vs Python, input/test paths, project name).",
     "Neo4j backend only: use action='db_start' before action='index' with format='neo4j'; action='db_status' checks the container.",
-    "After indexing, switch to codegraph_query / codegraph_explore / codegraph_tests to retrieve the graph context you just created."
+    "After indexing, switch to codegraph_query / codegraph_explore / codegraph_tests to retrieve the graph context you just created.",
+    "Use action='status' to see the active project, the exact database opened by the backend, and which manifest repositories are indexed."
   ],
   inputSchema: typebox_exports.Object({
     action: stringEnum(
-      ["bootstrap_env", "init_config", "index", "db_start", "db_stop", "db_restart", "db_status", "db_backup", "db_restore", "db_backups", "bootstrap", "status"],
+      ["bootstrap_env", "init_config", "index", "index_all", "migrate_database", "db_start", "db_stop", "db_restart", "db_status", "db_backup", "db_restore", "db_backups", "bootstrap", "status"],
       { description: "Which setup operation to perform (see tool description)." }
     ),
+    repository: typebox_exports.Optional(typebox_exports.String({
+      description: "Manifest repository name (from the active .codegraph-project.toml). Resolves the directory and source label; do not combine with project_dir/source."
+    })),
+    legacy_path: typebox_exports.Optional(typebox_exports.String({
+      description: "migrate_database: path to the legacy SQLite database to copy into the project location."
+    })),
+    to_path: typebox_exports.Optional(typebox_exports.String({
+      description: "migrate_database: destination database path (default: the active project database)."
+    })),
     project_dir: typebox_exports.Optional(typebox_exports.String({
-      description: "Project directory. Required for init_config/index/db_*/bootstrap; optional for status. Defaults to cwd."
+      description: "Project directory. Required for init_config/index/db_*/bootstrap without a manifest; optional for status. Defaults to cwd."
     })),
     language: typebox_exports.Optional(stringEnum(["cpp", "python"], {
       description: "init_config: override auto-detected language."
@@ -20667,7 +21668,7 @@ var setupTool = {
       description: "init_config: include a [codegraph-html] section so doxygen-index also emits an interactive HTML graph (default true)."
     })),
     force: typebox_exports.Optional(typebox_exports.Boolean({
-      description: "init_config: overwrite an existing .doxygen-index.toml (default false \u2014 returns the existing one instead)."
+      description: "init_config: overwrite an existing .doxygen-index.toml (default false \u2014 returns the existing one instead). migrate_database: overwrite a populated destination (the original is preserved as a .pre-migrate backup)."
     })),
     clear: typebox_exports.Optional(typebox_exports.Boolean({
       description: "index: clear existing data for this source before ingesting into the graph (default false \u2014 won't wipe existing data; pass true to replace a source)."
@@ -20702,15 +21703,257 @@ var setupTool = {
       if (params.action === "bootstrap_env") {
         return runtime.bootstrapEnv(params);
       }
+      const selection = resolveRepositorySelection(runtime, params);
+      if (selection.error) {
+        return { ok: false, text: selection.error, details: { action: params.action } };
+      }
+      params = selection.params;
+      if (params.action === "index_all") {
+        return runIndexAll(runtime, params, context);
+      }
       const tmo = params.action === "index" || params.action === "bootstrap" ? SETUP_TIMEOUT_MS : 18e4;
       const res = await runtime.call("setup", params, tmo);
       if (!res.ok) return { ok: false, text: `codegraph setup error: ${res.error}`, details: { error: res.error } };
+      if (params.action === "migrate_database") {
+        const raw = res.raw ?? {};
+        if (raw && typeof raw === "object" && raw.ok === false) {
+          return { ok: false, text: `codegraph migrate_database failed: ${raw.error ?? "unknown error"}`, details: { action: "migrate_database", raw: res.raw } };
+        }
+        if (raw && typeof raw === "object" && raw.ok === true && raw.validated !== true) {
+          return { ok: false, text: "codegraph migrate_database failed: destination counts did not validate against the source.", details: { action: "migrate_database", raw: res.raw } };
+        }
+      }
+      if (params.action === "status") {
+        const enriched = enrichStatusResult(res.raw, runtime.project);
+        return { ok: true, text: JSON.stringify(enriched, null, 2), details: { action: "status", raw: enriched } };
+      }
       return { ok: true, text: res.text, details: { action: params.action, raw: res.raw } };
     } catch (e) {
       return fail("codegraph_setup", e);
     }
   }
 };
+function resolveRepositorySelection(runtime, params) {
+  const action = params.action;
+  const repository = params.repository?.trim();
+  const projectDir = params.project_dir?.trim();
+  const source = params.source?.trim();
+  if (!repository && action !== "index") return { params };
+  const project = runtime.project ?? null;
+  if (!project) {
+    if (repository) {
+      return { params, error: `codegraph_setup: 'repository' requires an active project manifest \u2014 none is configured. Run status to inspect project resolution.` };
+    }
+    if (!projectDir) {
+      return { params, error: `codegraph_setup: 'index' needs a project_dir (no project manifest is active).` };
+    }
+    return { params };
+  }
+  const enabled = project.repositories.filter((r) => r.index);
+  if (repository) {
+    const repo = project.repositories.find((r) => r.name === repository);
+    if (!repo) {
+      const known = project.repositories.map((r) => `'${r.name}'${r.index ? "" : " (disabled)"}`).join(", ") || "(none)";
+      return { params, error: `codegraph_setup: unknown repository '${repository}'. Manifest repositories: ${known}.` };
+    }
+    if (!repo.index) {
+      return { params, error: `codegraph_setup: repository '${repository}' is disabled (index = false) in the project manifest.` };
+    }
+    if (!repo.exists) {
+      return { params, error: `codegraph_setup: repository '${repository}' path does not exist: ${repo.path}` };
+    }
+    if (projectDir) {
+      const given = projectDir.startsWith("/") ? projectDir : resolve3(projectDir);
+      if (given !== repo.path) {
+        return { params, error: `codegraph_setup: conflicting arguments \u2014 repository '${repository}' resolves to ${repo.path} but project_dir is ${projectDir}. Pass only one form.` };
+      }
+    }
+    if (source && source !== repo.source) {
+      return { params, error: `codegraph_setup: conflicting arguments \u2014 repository '${repository}' has source '${repo.source}' but source '${source}' was passed. Pass only one form.` };
+    }
+    const next = { ...params };
+    delete next.repository;
+    next.project_dir = repo.path;
+    next.source = repo.source;
+    return { params: next };
+  }
+  if (action === "index" && !projectDir) {
+    if (enabled.length === 1) {
+      const repo = enabled[0];
+      if (!repo.exists) {
+        return { params, error: `codegraph_setup: the only enabled repository '${repo.name}' path does not exist: ${repo.path}` };
+      }
+      const next = { ...params };
+      next.project_dir = repo.path;
+      next.source = repo.source;
+      return { params: next };
+    }
+    if (enabled.length === 0) {
+      return { params, error: "codegraph_setup: 'index' needs a repository or project_dir \u2014 the active manifest declares no enabled repositories." };
+    }
+    return { params, error: `codegraph_setup: 'index' is ambiguous \u2014 the manifest has ${enabled.length} enabled repositories. Pass repository='<name>'.` };
+  }
+  return { params };
+}
+async function runIndexAll(runtime, params, context) {
+  const project = runtime.project ?? null;
+  if (!project) {
+    return { ok: false, text: "codegraph_setup: 'index_all' requires an active project manifest \u2014 none is configured.", details: { action: "index_all" } };
+  }
+  const repos = project.repositories.filter((r) => r.index);
+  if (repos.length === 0) {
+    return { ok: false, text: "codegraph_setup: 'index_all' found no enabled repositories in the active manifest.", details: { action: "index_all" } };
+  }
+  const missing = repos.filter((r) => !r.exists);
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      text: `codegraph_setup: 'index_all' aborted \u2014 missing repository path(s): ${missing.map((r) => r.name).join(", ")}. Fix the manifest paths first.`,
+      details: { action: "index_all", missing: missing.map((r) => ({ name: r.name, path: r.path })) }
+    };
+  }
+  const results = [];
+  let failed = 0;
+  for (const repo of repos) {
+    if (context.signal?.aborted) {
+      results.push({ repository: repo.name, status: "aborted", source: repo.source, path: repo.path });
+      failed += 1;
+      break;
+    }
+    const started = Date.now();
+    const callParams = {
+      action: "index",
+      project_dir: repo.path,
+      source: repo.source,
+      ...params.clear === true ? { clear: true } : {},
+      ...params.backend ? { backend: params.backend } : {},
+      ...params.format ? { format: params.format } : {},
+      ...params.output_dir ? { output_dir: params.output_dir } : {},
+      ...params.test_paths ? { test_paths: params.test_paths } : {},
+      ...params.timeout ? { timeout: params.timeout } : {}
+    };
+    let res;
+    try {
+      res = await runtime.call("setup", callParams, SETUP_TIMEOUT_MS);
+    } catch (e) {
+      const durationMs2 = Date.now() - started;
+      results.push({
+        repository: repo.name,
+        source: repo.source,
+        path: repo.path,
+        status: "failed",
+        exit_code: null,
+        duration_ms: durationMs2,
+        error: e instanceof Error ? e.message : String(e)
+      });
+      failed += 1;
+      continue;
+    }
+    const durationMs = Date.now() - started;
+    const raw = res.raw ?? {};
+    const okRun = res.ok && typeof raw.exit_code === "number" ? raw.exit_code === 0 : res.ok;
+    const entry = {
+      repository: repo.name,
+      source: repo.source,
+      path: repo.path,
+      status: okRun ? "ok" : "failed",
+      exit_code: raw.exit_code ?? null,
+      duration_ms: durationMs,
+      error: res.ok ? void 0 : res.error
+    };
+    if (okRun) {
+      const count = await sourceNodeCount(runtime, repo.source);
+      entry.node_count = count;
+    }
+    results.push(entry);
+    if (!okRun) failed += 1;
+  }
+  const ok = failed === 0;
+  const succeeded = results.filter((r) => r.status === "ok").length;
+  const text = `index_all: ${succeeded}/${repos.length} repositories indexed${ok ? "" : ` \u2014 ${failed} failed (successful sources preserved)`}
+project: ${project.id}
+database: ${project.databasePath}` + results.map(
+    (r) => `
+  [${r.status}] ${r.repository} (source ${r.source}) \u2014 exit ${r.exit_code}, ${r.duration_ms}ms` + (r.node_count !== void 0 ? `, ${r.node_count} nodes` : "")
+  ).join("") + (ok ? "" : `
+Use codegraph_setup action='index' with repository='<name>' to retry a failed repository.`);
+  return { ok, text, details: { action: "index_all", project: project.id, database: project.databasePath, results } };
+}
+function extractSourceCounts(raw) {
+  const counts = /* @__PURE__ */ new Map();
+  let value = raw;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return counts;
+    }
+  }
+  if (!value || typeof value !== "object") return counts;
+  const obj = value;
+  const sourcesKey = obj.sources;
+  if (sourcesKey !== void 0) {
+    if (Array.isArray(sourcesKey)) {
+      for (const s of sourcesKey) {
+        if (s && typeof s === "object" && typeof s.source === "string") {
+          const c = s.count;
+          if (typeof c === "number") counts.set(s.source, c);
+        }
+      }
+    } else if (typeof sourcesKey === "object" && sourcesKey !== null) {
+      for (const [source, c] of Object.entries(sourcesKey)) {
+        if (typeof c === "number") counts.set(source, c);
+      }
+    }
+    return counts;
+  }
+  if (Array.isArray(value)) {
+    for (const s of value) {
+      if (s && typeof s === "object" && typeof s.source === "string") {
+        const c = s.count;
+        if (typeof c === "number") counts.set(s.source, c);
+      }
+    }
+    return counts;
+  }
+  const entries = Object.entries(obj);
+  if (entries.length > 0 && entries.every(([, c]) => typeof c === "number")) {
+    for (const [source, c] of entries) {
+      if (typeof c === "number") counts.set(source, c);
+    }
+  }
+  return counts;
+}
+async function sourceNodeCount(runtime, source) {
+  try {
+    const res = await runtime.call("explore", { action: "sources" }, 3e4);
+    if (!res.ok) return 0;
+    return extractSourceCounts(res.raw).get(source) ?? 0;
+  } catch {
+    return 0;
+  }
+}
+function enrichStatusResult(raw, project) {
+  const out = raw && typeof raw === "object" ? { ...raw } : {};
+  if (!project) return out;
+  const sourceCounts = extractSourceCounts(out.sources);
+  out.project = {
+    id: project.id,
+    manifest: project.manifestPath ?? null,
+    directory: project.projectDir,
+    discovery_source: project.discoverySource
+  };
+  out.repositories = project.repositories.map((r) => ({
+    name: r.name,
+    source: r.source,
+    path: r.path,
+    enabled: r.index,
+    exists: r.exists,
+    indexed: sourceCounts.has(r.source),
+    node_count: sourceCounts.get(r.source) ?? 0
+  }));
+  return out;
+}
 var discoverTool = {
   name: "codegraph_discover",
   label: "Codegraph Discover",
@@ -21055,12 +22298,62 @@ function validateAgainstSchema(schema, value) {
 
 // integrations/codex/mcp.ts
 var PKG_VERSION = packageVersion();
+async function fetchWorkspaceRoots(server) {
+  try {
+    const capabilities = await waitForClientCapabilities(server);
+    if (!capabilities?.roots) return [];
+    const res = await server.listRoots();
+    return (res.roots ?? []).map((r) => ({ uri: r.uri, name: r.name }));
+  } catch {
+    return [];
+  }
+}
+async function waitForClientCapabilities(server, timeoutMs = 5e3) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const caps = server.getClientCapabilities();
+    if (caps) return caps;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return server.getClientCapabilities();
+}
 async function runMcpServer(runtime) {
   const rt = runtime ?? new CodegraphRuntime(resolveConfig({}, process.env, process.cwd()));
   const server = new Server(
     { name: "codegraph", version: PKG_VERSION },
     { capabilities: { tools: {} } }
   );
+  let projectReady = null;
+  async function resolveProjectForRoots(roots, reason = "project") {
+    const project = resolveProjectContext({
+      env: process.env,
+      cwd: process.cwd(),
+      workspaceRoots: roots,
+      pluginDataDir: dataDir(process.env)
+    });
+    await rt.updateProject(project);
+    process.stderr.write(
+      `[codegraph-mcp] ${reason} '${project.id}' (${project.discoverySource}) database ${project.databasePath}
+`
+    );
+  }
+  function ensureProjectResolved() {
+    if (!projectReady) {
+      projectReady = (async () => {
+        const roots = await fetchWorkspaceRoots(server);
+        try {
+          await resolveProjectForRoots(roots);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          process.stderr.write(`[codegraph-mcp] project resolution failed: ${msg}
+`);
+          await shutdown(1);
+          throw e;
+        }
+      })();
+    }
+    return projectReady;
+  }
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: ALL_TOOLS.map((def) => ({
       name: def.name,
@@ -21069,6 +22362,7 @@ async function runMcpServer(runtime) {
     }))
   }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    await ensureProjectResolved();
     const name = request.params.name;
     const def = findTool(name);
     if (!def) {
@@ -21089,7 +22383,7 @@ async function runMcpServer(runtime) {
     };
   });
   let shuttingDown = false;
-  const shutdown = async () => {
+  const shutdown = async (code = 0) => {
     if (shuttingDown) return;
     shuttingDown = true;
     try {
@@ -21100,7 +22394,7 @@ async function runMcpServer(runtime) {
       await rt.stopBridge();
     } catch {
     }
-    process.exit(0);
+    process.exit(code);
   };
   process.on("SIGINT", () => {
     void shutdown();
@@ -21113,6 +22407,17 @@ async function runMcpServer(runtime) {
   });
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  server.setNotificationHandler(RootsListChangedNotificationSchema, async () => {
+    try {
+      projectReady = null;
+      const roots = await fetchWorkspaceRoots(server);
+      await resolveProjectForRoots(roots, "roots changed \u2192 project");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      process.stderr.write(`[codegraph-mcp] project re-resolution after roots change failed: ${msg}
+`);
+    }
+  });
 }
 var require2 = createRequire(import.meta.url);
 var requireResolve = require2.resolve.bind(require2);
@@ -21127,3 +22432,42 @@ if (isEntry) {
 export {
   runMcpServer
 };
+/*! Bundled license information:
+
+smol-toml/dist/date.js:
+smol-toml/dist/error.js:
+smol-toml/dist/util.js:
+smol-toml/dist/primitive.js:
+smol-toml/dist/extract.js:
+smol-toml/dist/struct.js:
+smol-toml/dist/parse.js:
+smol-toml/dist/stringify.js:
+smol-toml/dist/index.js:
+  (*!
+   * Copyright (c) Squirrel Chat et al., All rights reserved.
+   * SPDX-License-Identifier: BSD-3-Clause
+   *
+   * Redistribution and use in source and binary forms, with or without
+   * modification, are permitted provided that the following conditions are met:
+   *
+   * 1. Redistributions of source code must retain the above copyright notice, this
+   *    list of conditions and the following disclaimer.
+   * 2. Redistributions in binary form must reproduce the above copyright notice,
+   *    this list of conditions and the following disclaimer in the
+   *    documentation and/or other materials provided with the distribution.
+   * 3. Neither the name of the copyright holder nor the names of its contributors
+   *    may be used to endorse or promote products derived from this software without
+   *    specific prior written permission.
+   *
+   * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+   * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+   * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+   * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+   * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+   * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+   * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+   * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+   * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+   * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+   *)
+*/

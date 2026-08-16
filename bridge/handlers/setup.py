@@ -19,6 +19,7 @@ import subprocess
 import sys
 
 from .explore import handle_explore
+from .stats import handle_stats
 
 _TAIL = 12_000  # max chars of captured stdout/stderr we return per command
 
@@ -148,6 +149,121 @@ def _apply_backend(params: dict) -> None:
         os.environ["CODEGRAPH_BACKEND"] = backend
 
 
+def _active_sqlite_path() -> str | None:
+    """Absolute path of the SQLite database actually opened by the backend.
+
+    Reads the active backend's config (the bridge child inherits an absolute
+    ``SQLITE_PATH`` from the TypeScript runtime, so the backend config and
+    this env var agree by construction).  Falls back to the env var when the
+    backend isn't constructed yet.  Never reconstructs the path from
+    ``project_dir``.
+    """
+    try:
+        from codegraph import get_backend
+
+        backend = get_backend()
+        cfg = getattr(backend, "_config", None)
+        path = getattr(cfg, "path", None)
+        if isinstance(path, str) and path and path != ":memory:":
+            return os.path.abspath(path)
+    except Exception:
+        pass
+    env_path = (os.environ.get("SQLITE_PATH") or "").strip()
+    if env_path:
+        return os.path.abspath(env_path)
+    return None
+
+
+def _sqlite_counts(path: str) -> tuple[int | None, int | None]:
+    """(nodes, edges) counts for a SQLite file, or (None, None) if it is not
+    a codegraph database."""
+    import sqlite3
+
+    try:
+        con = sqlite3.connect(path)
+        try:
+            nodes = con.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+            edges = con.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+            return int(nodes), int(edges)
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return None, None
+
+
+def _handle_migrate_database(params: dict) -> dict:
+    """Explicit migration of a legacy database into a new location.
+
+    - Inspects the legacy database (nodes + edges tables).
+    - Refuses to overwrite a populated destination without ``force``.
+    - Copies with SQLite's backup API so WAL state is handled correctly.
+    - Preserves the original and any pre-existing destination file.
+    - Validates source, node, and edge counts at the destination.
+    """
+    import shutil
+    import sqlite3
+
+    src = (params.get("legacy_path") or "").strip()
+    if not src:
+        raise ValueError("migrate_database requires legacy_path")
+    src_abs = os.path.abspath(src)
+    if not os.path.isfile(src_abs):
+        return {"ok": False, "error": f"legacy database not found: {src_abs}"}
+
+    dest = (params.get("to_path") or "").strip() or (os.environ.get("SQLITE_PATH") or "").strip()
+    if not dest:
+        return {"ok": False,
+                "error": "migrate_database needs a destination (to_path, or an active project SQLITE_PATH)"}
+    dest_abs = os.path.abspath(dest)
+    if src_abs == dest_abs:
+        return {"ok": False, "error": "source and destination are the same file"}
+
+    src_nodes, src_edges = _sqlite_counts(src_abs)
+    if src_nodes is None:
+        return {"ok": False, "error": f"{src_abs} is not a codegraph database (no nodes table)"}
+
+    # Refuse to overwrite a populated destination without explicit
+    # destructive authorization.
+    preserved = None
+    if os.path.exists(dest_abs):
+        dn, de = _sqlite_counts(dest_abs)
+        if (dn or 0) > 0 or (de or 0) > 0:
+            if not params.get("force"):
+                return {"ok": False,
+                        "error": (f"destination {dest_abs} already contains {dn} nodes — "
+                                  f"pass force=true to overwrite (the original is preserved)")}
+        preserved = dest_abs + ".pre-migrate"
+        shutil.copy2(dest_abs, preserved)
+        for suffix in ("-wal", "-shm"):
+            side = dest_abs + suffix
+            if os.path.exists(side):
+                shutil.copy2(side, preserved + suffix)
+
+    os.makedirs(os.path.dirname(dest_abs) or ".", exist_ok=True)
+    src_con = sqlite3.connect(src_abs)
+    dst_con = sqlite3.connect(dest_abs)
+    try:
+        src_con.backup(dst_con)
+        dst_con.commit()
+    finally:
+        dst_con.close()
+        src_con.close()
+
+    dn, de = _sqlite_counts(dest_abs)
+    return {
+        "ok": True,
+        "source": src_abs,
+        "source_size_bytes": os.path.getsize(src_abs),
+        "destination": dest_abs,
+        "source_nodes": src_nodes,
+        "source_edges": src_edges,
+        "destination_nodes": dn,
+        "destination_edges": de,
+        "preserved_original": preserved,
+        "validated": dn == src_nodes and de == src_edges,
+    }
+
+
 def handle_setup(params: dict):
     action = params.get("action")
     project_dir = params.get("project_dir") or os.getcwd()
@@ -197,6 +313,9 @@ def handle_setup(params: dict):
         res["format"] = fmt
         res["backend"] = os.environ.get("CODEGRAPH_BACKEND", "sqlite")
         return res
+
+    if action == "migrate_database":
+        return _handle_migrate_database(params)
 
     if action in ("db_start", "db_stop", "db_restart", "db_status"):
         cmd = action.split("_", 1)[1]
@@ -263,24 +382,53 @@ def handle_setup(params: dict):
             out["backend"] = type(backend).__name__.replace("Backend", "").lower()
             out["backend_reachable"] = bool(backend.verify_connectivity())
         except Exception as e:
+            backend = None
             out["backend"] = "unknown"
             out["backend_reachable"] = False
             out["backend_error"] = str(e)
-        if params.get("project_dir") and out.get("backend") == "neo4j":
+
+        if out.get("backend") == "neo4j" and params.get("project_dir"):
             out["docker"] = _run_cli("codegraph.persistence.db_cli", ["status", "--project-dir", pd],
                                       cwd=pd, timeout=30)
-        elif params.get("project_dir"):
-            from pathlib import Path
-            import os as _os
-            path = _os.environ.get("SQLITE_PATH", "codegraph.sqlite3")
-            db_path = Path(path)
-            if not db_path.is_absolute():
-                db_path = Path(pd) / path
-            out["sqlite_db"] = {
-                "path": str(db_path),
-                "exists": db_path.is_file(),
-                "size_bytes": db_path.stat().st_size if db_path.is_file() else 0,
+        elif out.get("backend") == "sqlite":
+            # Report the database path from the active backend configuration,
+            # never reconstructed from project_dir.
+            db_path = _active_sqlite_path()
+            out["database"] = {
+                "path": db_path,
+                "exists": bool(db_path and os.path.isfile(db_path)),
+                "size_bytes": os.path.getsize(db_path) if db_path and os.path.isfile(db_path) else 0,
+                "total_nodes": None,
+                "total_relationships": None,
             }
+            try:
+                stats = handle_stats()
+                out["database"]["total_nodes"] = stats.get("total_nodes")
+                out["database"]["total_relationships"] = stats.get("total_relationships")
+                out["sources"] = stats.get("by_source", [])
+            except Exception as e:
+                out["stats_error"] = str(e)
+                try:
+                    out["sources"] = json.loads(handle_explore({"action": "sources"}))
+                except Exception:
+                    out["sources"] = []
+        else:
+            # Backend unknown/unavailable: still report the configured
+            # SQLite database path and any source rollup we can obtain.
+            db_path = _active_sqlite_path()
+            if db_path:
+                out["database"] = {
+                    "path": db_path,
+                    "exists": bool(os.path.isfile(db_path)),
+                    "size_bytes": os.path.getsize(db_path) if os.path.isfile(db_path) else 0,
+                    "total_nodes": None,
+                    "total_relationships": None,
+                }
+            try:
+                parsed = json.loads(handle_explore({"action": "sources"}))
+                out["sources"] = parsed.get("sources", {}) if isinstance(parsed, dict) else parsed
+            except Exception:
+                out["sources"] = []
         try:
             out["tags"] = json.loads(handle_explore({"action": "tags"}))
         except Exception as e:
@@ -295,6 +443,6 @@ def handle_setup(params: dict):
 
     raise ValueError(
         f"Unknown setup action {action!r}. Valid: bootstrap_env, init_config, "
-        f"index, db_start, db_stop, db_restart, db_status, db_backup, "
-        f"db_restore, db_backups, bootstrap, status"
+        f"index, index_all, migrate_database, db_start, db_stop, db_restart, "
+        f"db_status, db_backup, db_restore, db_backups, bootstrap, status"
     )

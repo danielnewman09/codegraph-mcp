@@ -2,6 +2,8 @@
  * Shared test helpers — spawned-stdio MCP server client.
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,6 +14,11 @@ import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const MCP_ENTRY = join(__dirname, "..", "..", "integrations", "codex", "mcp.ts");
 export const FAKE_BRIDGE = join(__dirname, "..", "fixtures", "fake-bridge.mjs");
+
+/** Fresh per-test plugin-data dir so project fallback stays hermetic. */
+export function testPluginData(): string {
+  return mkdtempSync(join(tmpdir(), "cg-mcp-pd-"));
+}
 
 /** Minimal Transport over a manually-spawned child process. */
 export class SpawnedStdioTransport implements Transport {
@@ -67,7 +74,11 @@ export async function startServer(
 ): Promise<{ client: Client; transport: SpawnedStdioTransport }> {
   const child = spawn(process.execPath, ["--import", "tsx", MCP_ENTRY], {
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, ...extraEnv },
+    env: {
+      ...process.env,
+      PLUGIN_DATA: testPluginData(),
+      ...extraEnv,
+    },
   });
   const transport = new SpawnedStdioTransport(child);
   const client = new Client({ name: "codegraph-test-client", version: "0.0.0" });

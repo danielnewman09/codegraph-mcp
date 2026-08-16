@@ -78,6 +78,21 @@ export interface CodegraphToolDefinition {
 
 /** The subset of the runtime the tool executor needs. */
 export interface CodegraphRuntimeLike {
+  /** Resolved project context (may be null before discovery / for legacy). */
+  project?: {
+    id: string;
+    manifestPath?: string;
+    projectDir: string;
+    databasePath: string;
+    repositories: Array<{
+      name: string;
+      source: string;
+      path: string;
+      index: boolean;
+      exists: boolean;
+    }>;
+    discoverySource: string;
+  } | null;
   ensureBridge(): Promise<unknown>;
   call(method: string, params: JsonObject, timeoutMs?: number): Promise<BridgeCallResult>;
   callClass(method: string, params: JsonObject, timeoutClass: TimeoutClass): Promise<BridgeCallResult>;

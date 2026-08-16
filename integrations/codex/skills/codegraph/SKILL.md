@@ -38,15 +38,38 @@ The tools are: `codegraph_explore`, `codegraph_query`, `codegraph_tests`,
 
 - **Do not index or bootstrap unless the user explicitly asks.** Running
   `codegraph_setup action: "index"` or `action: "bootstrap"` re-indexes a
-  project and can **replace existing graph data** for a source.
+  repository and can **replace existing graph data** for that source.
 - `action: "db_restore"` replaces the entire database. `action: "clear"`
   (re-indexing with clear behavior) and `db_restore` are **destructive** —
   treat them as requiring explicit user intent.
 - To check the environment without changing anything, use
-  `codegraph_setup action: "status"` (bridge/backend/tags health).
+  `codegraph_setup action: "status"` — it reports the active project, the
+  exact database opened, and per-repository indexed state.
 - If the graph looks empty, verify what is indexed first with
   `codegraph_explore action: "tags"` / `action: "sources"` before assuming
   indexing is needed.
+
+## Multi-repository projects
+
+A Codex workspace can be one logical project containing several repositories
+indexed into a shared database. `.codegraph-project.toml` in a workspace root
+declares the project: `project.id` + `project.database` (resolved against the
+manifest dir) and a `[[repositories]]` list with `name`, `path`, optional
+`source` (defaults to `name`), and optional `index` (defaults to true; e.g.
+`index = false` for a shared `.venv`).
+
+- When a manifest is active, prefer `codegraph_setup action: "index"` with
+  `repository: "<name>"` over raw `project_dir` — the directory, stable
+  source label, and shared database are resolved from the manifest. Never mix
+  `repository` with `project_dir`/`source`.
+- `codegraph_setup action: "index_all"` indexes every enabled repository into
+  the shared database, sequentially, replacing only each repository's own
+  source when `clear: true`. It returns a per-repository summary and preserves
+  successful sources on partial failure.
+- `clear: true` clears **one source**, never the whole shared database.
+- Status shows which manifest repositories are already indexed and their node
+  counts; source-filtered queries (`codegraph_query scope: "source"`) isolate
+  one repository, while project-wide queries see all sources.
 
 ## Conventions
 

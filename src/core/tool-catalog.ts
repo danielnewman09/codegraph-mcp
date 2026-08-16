@@ -13,12 +13,15 @@
  */
 
 import { Type } from "typebox";
+import { resolve } from "node:path";
 
 import type {
+  BridgeCallResult,
   CodegraphRuntimeLike,
   CodegraphToolDefinition,
   JsonObject,
   TimeoutClass,
+  ToolExecutionContext,
   ToolResult,
 } from "./types.js";
 import { SETUP_TIMEOUT_MS, CALL_TIMEOUT_MS } from "./bridge.js";
@@ -366,34 +369,49 @@ export const setupTool: CodegraphToolDefinition = {
     "active backend (SQLite by default — a plain file, no Docker; pass backend='neo4j' to opt into the " +
     "project-local Neo4j Docker container). Use the `action` field to steer: " +
     "'bootstrap_env' (create/refresh a venv with codegraph + doxygen-index installed — run this first on a new machine), " +
-    "'init_config' (auto-detect language/inputs/tests and write `.doxygen-index.toml`), 'index' (parse the project and " +
-    "ingest into SQLite (the default), the deprecated legacy Neo4j backend, or JSON; clear defaults to false so it won't wipe existing data — pass clear=true to replace a source), " +
+    "'init_config' (auto-detect language/inputs/tests and write `.doxygen-index.toml`), 'index' (parse a repository and " +
+    "ingest it into SQLite (the default), the deprecated legacy Neo4j backend, or JSON; clear defaults to false so it won't wipe existing data — pass clear=true to replace just that source), " +
+    "'index_all' (index every enabled repository from the active .codegraph-project.toml manifest into the shared database, sequentially, replacing only each repo's own source when clear=true), " +
     "'db_start'/'db_stop'/'db_restart'/'db_status' (Neo4j backend only: manage the Docker container), " +
     "'db_backup' (Neo4j backend only: create a dump or tar backup — container is briefly stopped), " +
     "'db_restore' (Neo4j backend only: restore from a backup file — WARNING: destroys current data, safety backup created first), " +
     "'db_backups' (list available backup files with size and timestamp), " +
-    "'bootstrap' (one-shot: init_config → index, with clear=true; db_start only for the deprecated backend='neo4j'), or " +
-    "'status' (bridge + backend + tags health).",
-  promptSnippet: "Provision env, create .doxygen-index.toml, and index a project into the codegraph (SQLite by default, Neo4j optional)",
+    "'bootstrap' (one-shot: init_config → index, with clear=true; db_start only for the deprecated backend='neo4j'), " +
+    "'migrate_database' (copy an existing database into the project location with SQLite's backup API — refuses to overwrite a populated destination without force=true, preserves the originals, validates counts), or " +
+    "'status' (project + database + repositories + bridge health).",
+  promptSnippet: "Provision env, create .doxygen-index.toml, and index repositories into the codegraph (SQLite by default, Neo4j optional)",
   promptGuidelines: [
-    "DESTRUCTIVE: action='index' and action='bootstrap' re-index a project and can REPLACE existing graph data for that source. Only run them when the user EXPLICITLY asks to (re)index or bootstrap a project — never as a shortcut to 'explore' or 'set up the graph' when asked to read or understand code.",
+    "DESTRUCTIVE: action='index' and action='bootstrap' re-index a repository and can REPLACE existing graph data for that source. Only run them when the user EXPLICITLY asks to (re)index or bootstrap — never as a shortcut to 'explore' or 'set up the graph' when asked to read or understand code.",
+    "When a .codegraph-project.toml manifest is active, pass `repository` (manifest name) instead of `project_dir` — the directory, source label, and shared database are resolved from the manifest. Rejecting mixed arguments is intentional: pass one form only.",
+    "Use action='index_all' to index every enabled manifest repository into the shared database. It runs repositories sequentially; a failure of one repo preserves the others' successfully indexed sources and returns a per-repository summary.",
+    "Use action='migrate_database' with legacy_path to move an existing database into the project location (SQLite backup API, WAL-safe). It refuses to overwrite a populated destination unless force=true, and always preserves the original files.",
     "On a fresh machine, call codegraph_setup action='bootstrap_env' once before anything else — it creates a venv with codegraph + doxygen-index.",
     "The default backend is SQLite (a plain file — no Docker, no container to manage). Neo4j is a deprecated legacy backend; only use db_* actions and backend='neo4j' when explicitly requested.",
     "Use action='db_backup' (Neo4j backend only) to create a backup before risky operations like re-indexing with clear=true. Pass mode='tar' for speed or mode='dump' (default) for portability.",
     "Use action='db_backups' to list available backup files before restoring.",
     "DESTRUCTIVE: action='db_restore' replaces the entire database from a backup file. A safety backup is created automatically first. Only run when the user explicitly asks to restore.",
-    "To graph a new project end-to-end: codegraph_setup action='bootstrap' with project_dir — it writes the config and indexes (Docker/Neo4j only when backend='neo4j').",
+    "To graph a new project end-to-end: codegraph_setup action='bootstrap' with project_dir (or repository) — it writes the config and indexes (Docker/Neo4j only when backend='neo4j').",
     "Use action='init_config' to generate/refresh `.doxygen-index.toml` from a repo (auto-detects C++ vs Python, input/test paths, project name).",
     "Neo4j backend only: use action='db_start' before action='index' with format='neo4j'; action='db_status' checks the container.",
     "After indexing, switch to codegraph_query / codegraph_explore / codegraph_tests to retrieve the graph context you just created.",
+    "Use action='status' to see the active project, the exact database opened by the backend, and which manifest repositories are indexed.",
   ],
   inputSchema: Type.Object({
     action: stringEnum(
-      ["bootstrap_env", "init_config", "index", "db_start", "db_stop", "db_restart", "db_status", "db_backup", "db_restore", "db_backups", "bootstrap", "status"],
+      ["bootstrap_env", "init_config", "index", "index_all", "migrate_database", "db_start", "db_stop", "db_restart", "db_status", "db_backup", "db_restore", "db_backups", "bootstrap", "status"],
       { description: "Which setup operation to perform (see tool description)." },
     ),
+    repository: Type.Optional(Type.String({
+      description: "Manifest repository name (from the active .codegraph-project.toml). Resolves the directory and source label; do not combine with project_dir/source.",
+    })),
+    legacy_path: Type.Optional(Type.String({
+      description: "migrate_database: path to the legacy SQLite database to copy into the project location.",
+    })),
+    to_path: Type.Optional(Type.String({
+      description: "migrate_database: destination database path (default: the active project database).",
+    })),
     project_dir: Type.Optional(Type.String({
-      description: "Project directory. Required for init_config/index/db_*/bootstrap; optional for status. Defaults to cwd.",
+      description: "Project directory. Required for init_config/index/db_*/bootstrap without a manifest; optional for status. Defaults to cwd.",
     })),
     language: Type.Optional(stringEnum(["cpp", "python"], {
       description: "init_config: override auto-detected language.",
@@ -415,7 +433,7 @@ export const setupTool: CodegraphToolDefinition = {
       description: "init_config: include a [codegraph-html] section so doxygen-index also emits an interactive HTML graph (default true).",
     })),
     force: Type.Optional(Type.Boolean({
-      description: "init_config: overwrite an existing .doxygen-index.toml (default false — returns the existing one instead).",
+      description: "init_config: overwrite an existing .doxygen-index.toml (default false — returns the existing one instead). migrate_database: overwrite a populated destination (the original is preserved as a .pre-migrate backup).",
     })),
     clear: Type.Optional(Type.Boolean({
       description: "index: clear existing data for this source before ingesting into the graph (default false — won't wipe existing data; pass true to replace a source).",
@@ -450,16 +468,330 @@ export const setupTool: CodegraphToolDefinition = {
       if (params.action === "bootstrap_env") {
         return runtime.bootstrapEnv(params);
       }
+
+      // Repository selection: resolve a manifest repository name to an
+      // explicit project_dir + source before dispatch.  Conflicts between
+      // forms are errors, never silent choices.
+      const selection = resolveRepositorySelection(runtime, params);
+      if (selection.error) {
+        return { ok: false, text: selection.error, details: { action: params.action } };
+      }
+      params = selection.params;
+
+      if (params.action === "index_all") {
+        return runIndexAll(runtime, params, context);
+      }
+
       const tmo = params.action === "index" || params.action === "bootstrap"
         ? SETUP_TIMEOUT_MS : 180_000;
       const res = await runtime.call("setup", params, tmo);
       if (!res.ok) return { ok: false, text: `codegraph setup error: ${res.error}`, details: { error: res.error } };
+
+      // migrate_database reports failures as action-level results (the bridge
+      // transport itself succeeded): surface them as failed tool calls.
+      if (params.action === "migrate_database") {
+        const raw = (res.raw ?? {}) as { ok?: unknown; error?: unknown; validated?: unknown };
+        if (raw && typeof raw === "object" && raw.ok === false) {
+          return { ok: false, text: `codegraph migrate_database failed: ${raw.error ?? "unknown error"}`, details: { action: "migrate_database", raw: res.raw } };
+        }
+        if (raw && typeof raw === "object" && raw.ok === true && raw.validated !== true) {
+          return { ok: false, text: "codegraph migrate_database failed: destination counts did not validate against the source.", details: { action: "migrate_database", raw: res.raw } };
+        }
+      }
+
+      if (params.action === "status") {
+        const enriched = enrichStatusResult(res.raw, runtime.project);
+        return { ok: true, text: JSON.stringify(enriched, null, 2), details: { action: "status", raw: enriched } };
+      }
       return { ok: true, text: res.text, details: { action: params.action, raw: res.raw } };
     } catch (e) {
       return fail("codegraph_setup", e);
     }
   },
 };
+
+/**
+ * Resolve a manifest `repository` name to an explicit `project_dir` +
+ * `source`, or pick the sole enabled repository when neither `repository`
+ * nor `project_dir` is given.  Returns the (possibly rewritten) params, or
+ * a selection error.
+ */
+function resolveRepositorySelection(
+  runtime: CodegraphRuntimeLike,
+  params: JsonObject,
+): { params: JsonObject; error?: string } {
+  const action = params.action as string;
+  const repository = (params.repository as string | undefined)?.trim();
+  const projectDir = (params.project_dir as string | undefined)?.trim();
+  const source = (params.source as string | undefined)?.trim();
+
+  // Actions that never target a single repository.
+  if (!repository && action !== "index") return { params };
+
+  const project = runtime.project ?? null;
+  if (!project) {
+    if (repository) {
+      return { params, error: `codegraph_setup: 'repository' requires an active project manifest — none is configured. Run status to inspect project resolution.` };
+    }
+    if (!projectDir) {
+      return { params, error: `codegraph_setup: 'index' needs a project_dir (no project manifest is active).` };
+    }
+    return { params };
+  }
+
+  const enabled = project.repositories.filter((r) => r.index);
+
+  if (repository) {
+    const repo = project.repositories.find((r) => r.name === repository);
+    if (!repo) {
+      const known = project.repositories.map((r) => `'${r.name}'${r.index ? "" : " (disabled)"}`).join(", ") || "(none)";
+      return { params, error: `codegraph_setup: unknown repository '${repository}'. Manifest repositories: ${known}.` };
+    }
+    if (!repo.index) {
+      return { params, error: `codegraph_setup: repository '${repository}' is disabled (index = false) in the project manifest.` };
+    }
+    if (!repo.exists) {
+      return { params, error: `codegraph_setup: repository '${repository}' path does not exist: ${repo.path}` };
+    }
+    if (projectDir) {
+      const given = projectDir.startsWith("/") ? projectDir : resolve(projectDir);
+      if (given !== repo.path) {
+        return { params, error: `codegraph_setup: conflicting arguments — repository '${repository}' resolves to ${repo.path} but project_dir is ${projectDir}. Pass only one form.` };
+      }
+    }
+    if (source && source !== repo.source) {
+      return { params, error: `codegraph_setup: conflicting arguments — repository '${repository}' has source '${repo.source}' but source '${source}' was passed. Pass only one form.` };
+    }
+    const next: JsonObject = { ...params };
+    delete next.repository;
+    next.project_dir = repo.path;
+    next.source = repo.source;
+    return { params: next };
+  }
+
+  // No repository / project_dir: select the sole enabled repository.
+  if (action === "index" && !projectDir) {
+    if (enabled.length === 1) {
+      const repo = enabled[0];
+      if (!repo.exists) {
+        return { params, error: `codegraph_setup: the only enabled repository '${repo.name}' path does not exist: ${repo.path}` };
+      }
+      const next: JsonObject = { ...params };
+      next.project_dir = repo.path;
+      next.source = repo.source;
+      return { params: next };
+    }
+    if (enabled.length === 0) {
+      return { params, error: "codegraph_setup: 'index' needs a repository or project_dir — the active manifest declares no enabled repositories." };
+    }
+    return { params, error: `codegraph_setup: 'index' is ambiguous — the manifest has ${enabled.length} enabled repositories. Pass repository='<name>'.` };
+  }
+
+  return { params };
+}
+
+/**
+ * `index_all` — index every enabled manifest repository into the shared
+ * database, sequentially (avoiding concurrent SQLite writers), replacing
+ * only each repository's own source when clear=true.  A failure of one
+ * repository does not erase or roll back repositories that succeeded.
+ */
+async function runIndexAll(
+  runtime: CodegraphRuntimeLike,
+  params: JsonObject,
+  context: ToolExecutionContext,
+): Promise<ToolResult> {
+  const project = runtime.project ?? null;
+  if (!project) {
+    return { ok: false, text: "codegraph_setup: 'index_all' requires an active project manifest — none is configured.", details: { action: "index_all" } };
+  }
+  const repos = project.repositories.filter((r) => r.index);
+  if (repos.length === 0) {
+    return { ok: false, text: "codegraph_setup: 'index_all' found no enabled repositories in the active manifest.", details: { action: "index_all" } };
+  }
+
+  const missing = repos.filter((r) => !r.exists);
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      text: `codegraph_setup: 'index_all' aborted — missing repository path(s): ${missing.map((r) => r.name).join(", ")}. Fix the manifest paths first.`,
+      details: { action: "index_all", missing: missing.map((r) => ({ name: r.name, path: r.path })) },
+    };
+  }
+
+  const results: Array<Record<string, unknown>> = [];
+  let failed = 0;
+  for (const repo of repos) {
+    if (context.signal?.aborted) {
+      results.push({ repository: repo.name, status: "aborted", source: repo.source, path: repo.path });
+      failed += 1;
+      break;
+    }
+    const started = Date.now();
+    const callParams: JsonObject = {
+      action: "index",
+      project_dir: repo.path,
+      source: repo.source,
+      ...(params.clear === true ? { clear: true } : {}),
+      ...(params.backend ? { backend: params.backend } : {}),
+      ...(params.format ? { format: params.format } : {}),
+      ...(params.output_dir ? { output_dir: params.output_dir } : {}),
+      ...(params.test_paths ? { test_paths: params.test_paths } : {}),
+      ...(params.timeout ? { timeout: params.timeout } : {}),
+    };
+    let res: BridgeCallResult;
+    try {
+      res = await runtime.call("setup", callParams, SETUP_TIMEOUT_MS);
+    } catch (e) {
+      // A bridge-level failure of one repo must not abort the remaining
+      // repositories — record it and continue so successful sources survive.
+      const durationMs = Date.now() - started;
+      results.push({
+        repository: repo.name,
+        source: repo.source,
+        path: repo.path,
+        status: "failed",
+        exit_code: null,
+        duration_ms: durationMs,
+        error: e instanceof Error ? e.message : String(e),
+      });
+      failed += 1;
+      continue;
+    }
+    const durationMs = Date.now() - started;
+    const raw = (res.raw ?? {}) as Record<string, unknown>;
+    const okRun = res.ok && typeof raw.exit_code === "number" ? raw.exit_code === 0 : res.ok;
+    const entry: Record<string, unknown> = {
+      repository: repo.name,
+      source: repo.source,
+      path: repo.path,
+      status: okRun ? "ok" : "failed",
+      exit_code: raw.exit_code ?? null,
+      duration_ms: durationMs,
+      error: res.ok ? undefined : res.error,
+    };
+    if (okRun) {
+      const count = await sourceNodeCount(runtime, repo.source);
+      entry.node_count = count;
+    }
+    results.push(entry);
+    if (!okRun) failed += 1;
+  }
+
+  const ok = failed === 0;
+  const succeeded = results.filter((r) => r.status === "ok").length;
+  const text =
+    `index_all: ${succeeded}/${repos.length} repositories indexed${ok ? "" : ` — ${failed} failed (successful sources preserved)`}` +
+    `\nproject: ${project.id}` +
+    `\ndatabase: ${project.databasePath}` +
+    results.map((r) =>
+      `\n  [${r.status}] ${r.repository} (source ${r.source}) — exit ${r.exit_code}, ${r.duration_ms}ms` +
+      (r.node_count !== undefined ? `, ${r.node_count} nodes` : ""),
+    ).join("") +
+    (ok ? "" : `\nUse codegraph_setup action='index' with repository='<name>' to retry a failed repository.`);
+  return { ok, text, details: { action: "index_all", project: project.id, database: project.databasePath, results } };
+}
+
+/**
+ * Normalize a bridge `sources` response into a source → node-count map.
+ *
+ * The real handlers emit two different shapes:
+ *   - `explore` action=sources → JSON string `{"sources": {"src": count}}`
+ *   - `setup` action=status `sources` → array `[{source, count}]`
+ * (and the legacy array-under-`sources` form).  One helper handles every
+ * shape so index_all summaries and status enrichment agree.
+ */
+function extractSourceCounts(raw: unknown): Map<string, number> {
+  const counts = new Map<string, number>();
+  let value: unknown = raw;
+  if (typeof value === "string") {
+    try { value = JSON.parse(value); } catch { return counts; }
+  }
+  if (!value || typeof value !== "object") return counts;
+  const obj = value as Record<string, unknown>;
+
+  const sourcesKey = obj.sources;
+  if (sourcesKey !== undefined) {
+    if (Array.isArray(sourcesKey)) {
+      for (const s of sourcesKey) {
+        if (s && typeof s === "object" && typeof (s as Record<string, unknown>).source === "string") {
+          const c = (s as Record<string, unknown>).count;
+          if (typeof c === "number") counts.set((s as Record<string, unknown>).source as string, c);
+        }
+      }
+    } else if (typeof sourcesKey === "object" && sourcesKey !== null) {
+      for (const [source, c] of Object.entries(sourcesKey as Record<string, unknown>)) {
+        if (typeof c === "number") counts.set(source, c);
+      }
+    }
+    return counts;
+  }
+
+  if (Array.isArray(value)) {
+    for (const s of value) {
+      if (s && typeof s === "object" && typeof (s as Record<string, unknown>).source === "string") {
+        const c = (s as Record<string, unknown>).count;
+        if (typeof c === "number") counts.set((s as Record<string, unknown>).source as string, c);
+      }
+    }
+    return counts;
+  }
+
+  // Bare map form: `{source: count}` (degraded status branch unwraps the
+  // explore string to the map directly).  Only treat it as sources when every
+  // value is a number.
+  const entries = Object.entries(obj);
+  if (entries.length > 0 && entries.every(([, c]) => typeof c === "number")) {
+    for (const [source, c] of entries) {
+      if (typeof c === "number") counts.set(source, c);
+    }
+  }
+  return counts;
+}
+
+/** Query the bridge for a source's node count (0 when absent/unknown). */
+async function sourceNodeCount(
+  runtime: CodegraphRuntimeLike,
+  source: string,
+): Promise<number> {
+  try {
+    const res = await runtime.call("explore", { action: "sources" }, 30_000);
+    if (!res.ok) return 0;
+    return extractSourceCounts(res.raw).get(source) ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Merge manifest project context into a `status` bridge result. */
+function enrichStatusResult(
+  raw: unknown,
+  project: CodegraphRuntimeLike["project"],
+): Record<string, unknown> {
+  const out: Record<string, unknown> = raw && typeof raw === "object"
+    ? { ...(raw as Record<string, unknown>) }
+    : {};
+  if (!project) return out;
+
+  const sourceCounts = extractSourceCounts(out.sources);
+
+  out.project = {
+    id: project.id,
+    manifest: project.manifestPath ?? null,
+    directory: project.projectDir,
+    discovery_source: project.discoverySource,
+  };
+  out.repositories = project.repositories.map((r) => ({
+    name: r.name,
+    source: r.source,
+    path: r.path,
+    enabled: r.index,
+    exists: r.exists,
+    indexed: sourceCounts.has(r.source),
+    node_count: sourceCounts.get(r.source) ?? 0,
+  }));
+  return out;
+}
 
 // ══════════════════════════════════════════════════════════════════════════
 // codegraph_discover

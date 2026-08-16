@@ -50,7 +50,7 @@ export function bridgeResultFromResponse(
   details?: unknown,
 ): BridgeCallResult {
   if (!res.ok) {
-    return { ok: false, text: res.error ?? "codegraph error", details, error: res.error };
+    return { ok: false, text: res.error ?? "codegraph error", details, error: res.error, raw: res.result };
   }
-  return { ok: true, text: resultText(res.result), details };
+  return { ok: true, text: resultText(res.result), details, raw: res.result };
 }

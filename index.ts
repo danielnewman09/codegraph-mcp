@@ -18,7 +18,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { existsSync } from "node:fs";
 import {
-  ok, err,
   DEFAULT_VENV, CONFIG_FILE,
 } from "./shared.js";
 import { CodegraphRuntime } from "./src/core/runtime.js";
@@ -97,16 +96,6 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
 
   let runtime: CodegraphRuntime = buildRuntime();
 
-  async function ensureBridge() {
-    return runtime.ensureBridge();
-  }
-
-  /** Adapter: runtime.bootstrapEnv (ToolResult) → Pi message shape. */
-  async function bootstrapEnv(params: Record<string, unknown>) {
-    const r = await runtime.bootstrapEnv(params);
-    return r.ok ? ok(r.text, r.details) : err(r.text, r.details);
-  }
-
   // ── Lifecycle ────────────────────────────────────────────────────────────
   pi.on("session_start", () => {
     const prev = runtime;
@@ -156,17 +145,16 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
     return { block: true, reason: STEER_REASON };
   });
 
-  // ── Register tools ───────────────────────────────────────────────────────
-  const bridgeDeps = { ensureBridge };
-  registerQueryTool(pi, bridgeDeps);
-  registerExploreTool(pi, bridgeDeps);
-  registerTestsTool(pi, bridgeDeps);
-  registerStatsTool(pi, bridgeDeps);
-  registerSetupTool(pi, { ensureBridge, bootstrapEnv });
-  registerDiscoverTool(pi, bridgeDeps);
-  registerDecomposeTool(pi, bridgeDeps);
-  registerDesignTool(pi, bridgeDeps);
-  registerMemoryTool(pi, bridgeDeps);
+  // ── Register tools (Pi wrappers adapt catalog definitions) ─────────────
+  registerQueryTool(pi, runtime);
+  registerExploreTool(pi, runtime);
+  registerTestsTool(pi, runtime);
+  registerStatsTool(pi, runtime);
+  registerSetupTool(pi, runtime);
+  registerDiscoverTool(pi, runtime);
+  registerDecomposeTool(pi, runtime);
+  registerDesignTool(pi, runtime);
+  registerMemoryTool(pi, runtime);
 
   // ── /codegraph command ───────────────────────────────────────────────────
   pi.registerCommand("codegraph", {
@@ -186,9 +174,9 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
         const p: Record<string, unknown> = { action: "bootstrap_env" };
         if (parts[1]) p.codegraph_source = parts[1];
         if (parts[2]) p.doxygen_index_source = parts[2];
-        const r = await bootstrapEnv(p);
-        const line = r.content[0]?.text ?? "";
-        const isError = r.isError === true;
+        const r = await runtime.bootstrapEnv(p);
+        const line = r.text;
+        const isError = !r.ok;
         if (ctx.hasUI) ctx.ui.notify(line, isError ? "error" : "info");
         else console.log(line);
         return;

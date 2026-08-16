@@ -8,6 +8,8 @@
 /** A JSON-serialisable object. */
 export type JsonObject = Record<string, unknown>;
 
+import type { TSchema } from "typebox";
+
 /** Per-call execution context supplied by the harness. */
 export interface ToolExecutionContext {
   /** Abort the underlying work when signalled. */
@@ -41,6 +43,8 @@ export interface BridgeCallResult {
   text: string;
   details?: unknown;
   error?: string;
+  /** Raw bridge result (object/string) for post-processing like HTML detection. */
+  raw?: unknown;
 }
 
 /**
@@ -52,8 +56,9 @@ export interface CodegraphToolDefinition {
   name: string;
   label: string;
   description: string;
-  /** JSON Schema-compatible input schema. */
-  inputSchema: JsonObject;
+  /** Parameter schema. TypeBox schemas are JSON-Schema-compatible; the
+   *  MCP harness converts them via ``toolInputJsonSchema``. */
+  inputSchema: TSchema;
   promptSnippet?: string;
   promptGuidelines?: string[];
   /** Internal bridge method, e.g. "query". */
@@ -75,4 +80,6 @@ export interface CodegraphToolDefinition {
 export interface CodegraphRuntimeLike {
   ensureBridge(): Promise<unknown>;
   call(method: string, params: JsonObject, timeoutMs?: number): Promise<BridgeCallResult>;
+  callClass(method: string, params: JsonObject, timeoutClass: TimeoutClass): Promise<BridgeCallResult>;
+  bootstrapEnv(params: JsonObject): Promise<ToolResult>;
 }

@@ -1,0 +1,42 @@
+{
+  "name": "codegraph",
+  "version": "0.1.0",
+  "description": "Codebase knowledge-graph tools for Codex: retrieve code structure and design context, explore symbols and tests, index projects into a local graph, and run decomposition/design pipelines.",
+  "author": {
+    "name": "Daniel Newman",
+    "email": "danielnewman09@gmail.com",
+    "url": "https://github.com/danielnewman09"
+  },
+  "homepage": "https://github.com/danielnewman09/codegraph-mcp",
+  "repository": "https://github.com/danielnewman09/codegraph-mcp",
+  "license": "MIT",
+  "keywords": [
+    "codegraph",
+    "knowledge-graph",
+    "codebase-context",
+    "mcp",
+    "design",
+    "indexing"
+  ],
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Codegraph",
+    "shortDescription": "Codebase knowledge-graph retrieval, indexing, and design tools",
+    "longDescription": "Query the codegraph knowledge graph for code structure, symbols, tests, requirements, and design memory; index projects into a local SQLite graph (or opt-in Neo4j); and run HLR decomposition and OO design pipelines with verification stubs.",
+    "developerName": "Daniel Newman",
+    "category": "Coding",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/danielnewman09/codegraph-mcp",
+    "defaultPrompt": [
+      "List the indexed sources and tags.",
+      "Search for a class and show its members.",
+      "Fetch the neighborhood for a symbol as Markdown.",
+      "Show compact graph statistics."
+    ],
+    "brandColor": "#2E7CF6",
+    "screenshots": []
+  }
+}

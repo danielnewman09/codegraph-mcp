@@ -20,19 +20,19 @@ import { existsSync } from "node:fs";
 import {
   DEFAULT_VENV, CONFIG_FILE,
 } from "./shared.js";
-import { CodegraphRuntime } from "./src/core/runtime.js";
-import { resolveConfig, type ConfigOverrides } from "./src/core/config.js";
+import { CodegraphRuntime } from "../../src/core/runtime.js";
+import { resolveConfig, type ConfigOverrides } from "../../src/core/config.js";
 
 // ── Tool modules ───────────────────────────────────────────────────────────
-import { registerQueryTool } from "./tools/query.js";
-import { registerExploreTool } from "./tools/explore.js";
-import { registerTestsTool } from "./tools/tests.js";
-import { registerStatsTool } from "./tools/stats.js";
-import { registerSetupTool } from "./tools/setup.js";
-import { registerDiscoverTool } from "./tools/discover.js";
-import { registerDecomposeTool } from "./tools/decompose.js";
-import { registerDesignTool } from "./tools/design.js";
-import { registerMemoryTool } from "./tools/memory.js";
+import { registerQueryTool } from "../../tools/query.js";
+import { registerExploreTool } from "../../tools/explore.js";
+import { registerTestsTool } from "../../tools/tests.js";
+import { registerStatsTool } from "../../tools/stats.js";
+import { registerSetupTool } from "../../tools/setup.js";
+import { registerDiscoverTool } from "../../tools/discover.js";
+import { registerDecomposeTool } from "../../tools/decompose.js";
+import { registerDesignTool } from "../../tools/design.js";
+import { registerMemoryTool } from "../../tools/memory.js";
 
 // ── Extension entry point ──────────────────────────────────────────────────
 

@@ -10,7 +10,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-export const MCP_ENTRY = join(__dirname, "..", "..", "src", "harnesses", "mcp.ts");
+export const MCP_ENTRY = join(__dirname, "..", "..", "integrations", "codex", "mcp.ts");
 export const FAKE_BRIDGE = join(__dirname, "..", "fixtures", "fake-bridge.mjs");
 
 /** Minimal Transport over a manually-spawned child process. */

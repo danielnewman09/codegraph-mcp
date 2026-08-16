@@ -22,6 +22,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const CODEX_ROOT = join(ROOT, "integrations", "codex");
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
@@ -71,14 +72,14 @@ function checkUnknownKeys(obj, allowed, label) {
 }
 
 function checkContractPath(rel) {
-  const abs = resolve(ROOT, rel);
+  const abs = resolve(CODEX_ROOT, rel);
   if (!existsSync(abs)) {
     errors.push(`contract path \`${rel}\` must resolve inside the repository (${abs} missing)`);
   }
 }
 
 const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
-const manifest = JSON.parse(readFileSync(join(ROOT, ".codex-plugin", "plugin.json"), "utf8"));
+const manifest = JSON.parse(readFileSync(join(CODEX_ROOT, ".codex-plugin", "plugin.json"), "utf8"));
 
 checkUnknownKeys(manifest, ALLOWED_TOP, "");
 
@@ -138,7 +139,7 @@ if (manifest.mcpServers !== undefined) {
   } else {
     checkContractPath(manifest.mcpServers);
     if (manifest.mcpServers.endsWith(".mcp.json")) {
-      const mcp = JSON.parse(readFileSync(resolve(ROOT, manifest.mcpServers), "utf8"));
+      const mcp = JSON.parse(readFileSync(resolve(CODEX_ROOT, manifest.mcpServers), "utf8"));
       if (!mcp.mcpServers || typeof mcp.mcpServers !== "object") {
         errors.push("`.mcp.json` must contain an `mcpServers` object");
       } else {
@@ -164,7 +165,7 @@ if (manifest.apps !== undefined) {
 
 // MCP server name must match the plugin name.
 if (manifest.mcpServers && manifest.mcpServers.endsWith(".mcp.json")) {
-  const mcp = JSON.parse(readFileSync(resolve(ROOT, manifest.mcpServers), "utf8"));
+  const mcp = JSON.parse(readFileSync(resolve(CODEX_ROOT, manifest.mcpServers), "utf8"));
   if (mcp.mcpServers && !(manifest.name in (mcp.mcpServers ?? {}))) {
     errors.push(``.mcp.json` must declare a server named \`${manifest.name}\``);
   }

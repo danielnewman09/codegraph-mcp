@@ -21,14 +21,14 @@ export {
   SETUP_TIMEOUT_MS,
   WIN,
   type BridgeResponse,
-} from "./src/core/bridge.js";
+} from "../../src/core/bridge.js";
 
-export { DEFAULT_BRIDGE } from "./src/core/config.js";
-export { ok, err, tail } from "./src/core/results.js";
-export { startProgress, type ProgressHandle } from "./src/core/progress.js";
+export { DEFAULT_BRIDGE } from "../../src/core/config.js";
+export { ok, err, tail } from "../../src/core/results.js";
+export { startProgress, type ProgressHandle } from "../../src/core/progress.js";
 
-import { openPath as openPathCore } from "./src/core/paths.js";
-export { openPath as openPathCore } from "./src/core/paths.js";
+import { openPath as openPathCore } from "../../src/core/paths.js";
+export { openPath as openPathCore } from "../../src/core/paths.js";
 
 // ── Preserved Pi defaults (historical constants) ──────────────────────────
 //

@@ -8,7 +8,7 @@
  * that runs against `CodegraphRuntimeLike`.
  *
  * This module must not import Pi or MCP packages.  Both the Pi harness
- * (src/harnesses/pi.ts) and the MCP harness (src/harnesses/mcp.ts) derive
+ * (integrations/pi/pi.ts) and the MCP harness (integrations/codex/mcp.ts) derive
  * their registrations from these definitions.
  */
 

@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const SKILL = join(ROOT, "skills", "codegraph", "SKILL.md");
+const SKILL = join(ROOT, "integrations", "codex", "skills", "codegraph", "SKILL.md");
 
 const PUBLIC_TOOLS = new Set([
   "codegraph_query",

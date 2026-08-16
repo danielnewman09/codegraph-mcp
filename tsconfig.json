@@ -9,5 +9,5 @@
     "esModuleInterop": true,
     "types": ["node"]
   },
-  "include": ["index.ts"]
+  "include": ["integrations/**/*.ts", "src/**/*.ts", "tools/**/*.ts"]
 }

@@ -27,11 +27,11 @@ import {
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { CodegraphRuntime } from "../core/runtime.js";
-import { packageVersion, resolveConfig } from "../core/config.js";
-import { ALL_TOOLS, findTool, toolInputJsonSchema } from "../core/tool-catalog.js";
-import { validateAgainstSchema } from "../core/validate.js";
-import type { JsonObject } from "../core/types.js";
+import { CodegraphRuntime } from "../../src/core/runtime.js";
+import { packageVersion, resolveConfig } from "../../src/core/config.js";
+import { ALL_TOOLS, findTool, toolInputJsonSchema } from "../../src/core/tool-catalog.js";
+import { validateAgainstSchema } from "../../src/core/validate.js";
+import type { JsonObject } from "../../src/core/types.js";
 
 const PKG_VERSION: string = packageVersion();
 
@@ -96,7 +96,7 @@ export async function runMcpServer(runtime?: CodegraphRuntime): Promise<void> {
 const require = createRequire(import.meta.url);
 const requireResolve = require.resolve.bind(require);
 
-// Direct execution: `node dist/codex-mcp.js` or `tsx src/harnesses/mcp.ts`
+// Direct execution: `node dist/codegraph-mcp.js` or `tsx integrations/codex/mcp.ts`
 const isEntry = process.argv[1] != null
   && fileURLToPath(import.meta.url) === fileURLToPath(pathToFileURL(requireResolve(process.argv[1])));
 if (isEntry) {

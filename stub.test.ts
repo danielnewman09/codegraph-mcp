@@ -42,7 +42,7 @@ const pi: any = {
 };
 
 log("importing extension…");
-const mod = await import("./index.ts");
+const mod = await import("./integrations/pi/index.ts");
 mod.default(pi);
 log("flags:", [...flags.keys()]);
 log("tools:", [...tools.keys()]);

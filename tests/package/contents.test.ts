@@ -22,6 +22,6 @@ test("npm pack contains required files and excludes runtime/generated data", asy
     [],
     `forbidden files would be packed: ${forbidden.join(", ")}`,
   );
-  assert.ok(files.includes("dist/codex-mcp.js"), "bundled MCP server must ship");
+  assert.ok(files.includes("dist/codegraph-mcp.js"), "bundled MCP server must ship");
   assert.ok(files.includes("bridge/codegraph_bridge.py"), "Python bridge must ship");
 });

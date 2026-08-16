@@ -9,6 +9,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -16,15 +17,18 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 // Everything both harnesses need when installed.
 const REQUIRED = [
   "package.json",
-  "dist/codex-mcp.js",
-  "index.ts",
-  "shared.ts",
+  "dist/codegraph-mcp.js",
+  "integrations/pi/index.ts",
+  "integrations/pi/shared.ts",
+  "integrations/pi/pi.ts",
+  "integrations/codex/mcp.ts",
+  "integrations/codex/.codex-plugin/plugin.json",
+  "integrations/codex/.mcp.json",
+  "integrations/codex/skills/codegraph/SKILL.md",
   "tools/query.ts",
   "tools/setup.ts",
   "src/core/tool-catalog.ts",
   "src/core/runtime.ts",
-  "src/harnesses/pi.ts",
-  "src/harnesses/mcp.ts",
   "bridge/codegraph_bridge.py",
   "README.md",
   "LICENSE",
@@ -47,10 +51,14 @@ const FORBIDDEN_PATTERNS = [
 ];
 
 export async function runPackCheck(opts = {}) {
-  if (opts.build !== false && !existsSync(join(ROOT, "dist", "codex-mcp.js"))) {
+  if (opts.build !== false && !existsSync(join(ROOT, "dist", "codegraph-mcp.js"))) {
     execFileSync("npm", ["run", "build"], { cwd: ROOT, stdio: "inherit" });
   }
-  const out = execFileSync("npm", ["pack", "--dry-run", "--json"], { cwd: ROOT, encoding: "utf8" });
+  const out = execFileSync("npm", ["pack", "--dry-run", "--json"], {
+    cwd: ROOT,
+    encoding: "utf8",
+    env: { ...process.env, npm_config_cache: join(tmpdir(), "codegraph-mcp-npm-cache") },
+  });
   const parsed = JSON.parse(out);
   const pkg = Array.isArray(parsed) ? parsed[0] : parsed;
   const files = (pkg.files ?? []).map((f) => f.path);

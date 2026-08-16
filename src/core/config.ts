@@ -30,7 +30,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 /**
  * Walk up from the module directory to the package root (the first
  * directory containing package.json).  Works from both the source layout
- * (src/core/config.ts) and the bundled layout (dist/codex-mcp.js).
+ * (src/core/config.ts) and the bundled layout (dist/codegraph-mcp.js).
  */
 function packageRoot(): string {
   let dir = __dirname;

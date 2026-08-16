@@ -3,7 +3,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { registerCatalogTool } from "../src/harnesses/pi.js";
+import { registerCatalogTool } from "../integrations/pi/pi.js";
 import { decomposeTool } from "../src/core/tool-catalog.js";
 import type { CodegraphRuntime } from "../src/core/runtime.js";
 

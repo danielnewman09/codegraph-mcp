@@ -1,7 +1,7 @@
 {
   "name": "codegraph",
   "version": "0.1.0",
-  "description": "Pi extension wrapping the codegraph + doxygen-index libraries — a portable single package that bootstraps its own Python env, generates project config, manages a project-local Neo4j Docker container, indexes source into the graph, and retrieves rich knowledge-graph context via a narrow 3-tool surface (with interactive HTML neighborhood visualization).",
+  "description": "Shared codegraph runtime with separate Pi and Codex integration packages.",
   "type": "module",
   "license": "MIT",
   "author": "Daniel Newman",
@@ -14,25 +14,21 @@
     "codebase-context",
     "retrieval"
   ],
-  "main": "index.ts",
+  "main": "integrations/pi/index.ts",
   "bin": {
-    "codegraph-mcp": "./dist/codex-mcp.js"
+    "codegraph-mcp": "./dist/codegraph-mcp.js"
   },
   "pi": {
     "extensions": [
-      "./index.ts"
+      "./integrations/pi/index.ts"
     ]
   },
   "files": [
-    "index.ts",
-    "shared.ts",
+    "integrations",
     "tools",
     "src",
     "bridge",
     "dist",
-    ".codex-plugin",
-    ".mcp.json",
-    "skills",
     "README.md",
     "LICENSE",
     "!**/__pycache__/**",
@@ -40,7 +36,7 @@
   ],
   "scripts": {
     "check": "tsc --noEmit",
-    "build": "esbuild src/harnesses/mcp.ts --bundle --platform=node --format=esm --outfile=dist/codex-mcp.js --banner:js=\"#!/usr/bin/env node\"",
+    "build": "esbuild integrations/codex/mcp.ts --bundle --platform=node --format=esm --outfile=dist/codegraph-mcp.js --banner:js=\"#!/usr/bin/env node\"",
     "test": "node --import tsx --test \"tests/core/*.test.ts\" \"tests/mcp/*.test.ts\" \"tests/package/*.test.ts\" \"tests/plugin/*.test.ts\"",
     "test:mcp": "node --import tsx --test \"tests/mcp/*.test.ts\"",
     "test:pi": "tsx stub.test.ts",

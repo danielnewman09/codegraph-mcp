@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const CODEX_ROOT = join(ROOT, "integrations", "codex");
 
 test("plugin:validate passes (hermetic mirror of the Codex validator)", () => {
   const out = execFileSync("node", ["scripts/validate-plugin.mjs"], {
@@ -22,7 +23,7 @@ test("plugin:validate passes (hermetic mirror of the Codex validator)", () => {
 });
 
 test(".mcp.json declares exactly the codegraph stdio server", () => {
-  const mcp = JSON.parse(readFileSync(join(ROOT, ".mcp.json"), "utf8"));
+  const mcp = JSON.parse(readFileSync(join(CODEX_ROOT, ".mcp.json"), "utf8"));
   const names = Object.keys(mcp.mcpServers ?? {});
   assert.deepEqual(names, ["codegraph"]);
   const server = mcp.mcpServers.codegraph;
@@ -31,7 +32,7 @@ test(".mcp.json declares exactly the codegraph stdio server", () => {
 });
 
 test("plugin.json version matches package.json version", () => {
-  const plugin = JSON.parse(readFileSync(join(ROOT, ".codex-plugin", "plugin.json"), "utf8"));
+  const plugin = JSON.parse(readFileSync(join(CODEX_ROOT, ".codex-plugin", "plugin.json"), "utf8"));
   const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
   assert.equal(plugin.version, pkg.version);
 });

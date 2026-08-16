@@ -11,7 +11,7 @@ import type {
   CodegraphRuntimeLike,
   CodegraphToolDefinition,
   ToolResult,
-} from "../core/types.js";
+} from "../../src/core/types.js";
 
 export interface PiToolRegistrationOptions {
   /** Pi-specific call rendering (TUI). */

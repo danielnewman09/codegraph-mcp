@@ -19,6 +19,7 @@
     "indexing"
   ],
   "mcpServers": "./.mcp.json",
+  "skills": "./skills/",
   "interface": {
     "displayName": "Codegraph",
     "shortDescription": "Codebase knowledge-graph retrieval, indexing, and design tools",

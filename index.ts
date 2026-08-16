@@ -5,19 +5,9 @@
  * interactive visualization, setup/indexing, requirements discovery,
  * HLR decomposition, OO design, and design-memory management.
  *
- *   codegraph_query   — fetch a scoped subgraph as markdown / plantuml / json
- *                       / html, with a `scope` discriminator.
- *   codegraph_explore — lightweight lookups returning slim JSON.
- *   codegraph_tests   — test-focused exploration.
- *   codegraph_stats   — compact high-level statistics.
- *   codegraph_setup   — bootstrap env, config, indexing, backend lifecycle (SQLite default, Neo4j optional).
- *   codegraph_discover — discover existing requirements before designing.
- *   codegraph_decompose — decompose HLR → LLRs with verification stubs.
- *   codegraph_design   — OO class design, resolve verification stubs.
- *   codegraph_memory   — design memory: decisions, constraints, rationale.
- *
- * A long-lived Python sidecar (`bridge/codegraph_bridge.py`) holds a single
- * `CodeGraphDispatcher` (with its cached `current_graph`) for the session.
+ * This entry point is the Pi harness: it registers flags, the
+ * `/codegraph` command, read steering, and wires the tools to the
+ * host-neutral CodegraphRuntime (src/core/runtime.ts).
  *
  * Flags:
  *   --codegraph-python   Python interpreter (default: $CODEGRAPH_PYTHON or python3)
@@ -26,13 +16,13 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
 import {
-  CodegraphBridge, ok, err, tail, openPath,
-  DEFAULT_BRIDGE, DEFAULT_VENV, CONFIG_DIR, CONFIG_FILE,
-  SETUP_TIMEOUT_MS, WIN,
+  ok, err,
+  DEFAULT_VENV, CONFIG_FILE,
 } from "./shared.js";
+import { CodegraphRuntime } from "./src/core/runtime.js";
+import { resolveConfig, type ConfigOverrides } from "./src/core/config.js";
 
 // ── Tool modules ───────────────────────────────────────────────────────────
 import { registerQueryTool } from "./tools/query.js";
@@ -56,7 +46,7 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
   pi.registerFlag("codegraph-bridge", {
     description: "Path to the codegraph bridge script",
     type: "string",
-    default: DEFAULT_BRIDGE,
+    default: resolveConfig({}, process.env).bridgePath,
   });
   pi.registerFlag("codegraph-venv", {
     description: "Path to the auto-provisioned Python venv (created by codegraph_setup action='bootstrap_env'). Default: ~/.pi/agent/codegraph/venv",
@@ -84,191 +74,51 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
     default: false,
   });
 
+  // ── Runtime construction ────────────────────────────────────────────────
+  // The flags are read once per session; the runtime is rebuilt on
+  // session_start so a changed config/.env is picked up.
 
-  // ── Venv / interpreter resolution ────────────────────────────────────────
-  function venvDir(): string {
-    const f = pi.getFlag("codegraph-venv");
-    return (typeof f === "string" && f.trim()) ? f : DEFAULT_VENV;
-  }
-  function venvBin(name: string): string {
-    return join(venvDir(), WIN ? "Scripts" : "bin", WIN ? `${name}.exe` : name);
-  }
-  function venvPython(): string { return venvBin("python"); }
-  function venvExists(): boolean { return existsSync(join(venvDir(), "pyvenv.cfg")); }
-
-  interface CgConfig { python?: string }
-  function readConfig(): CgConfig {
-    try {
-      const raw = readFileSync(CONFIG_FILE, "utf8");
-      const obj = JSON.parse(raw);
-      return (obj && typeof obj === "object") ? obj as CgConfig : {};
-    } catch { return {}; }
-  }
-  function writeConfig(patch: CgConfig): void {
-    try {
-      mkdirSync(CONFIG_DIR, { recursive: true });
-      const cur = readConfig();
-      writeFileSync(CONFIG_FILE, JSON.stringify({ ...cur, ...patch }, null, 2) + "\n");
-    } catch { /* best-effort */ }
+  function flagStr(name: string): string | undefined {
+    const v = pi.getFlag(name);
+    return (typeof v === "string" && v.trim()) ? v : undefined;
   }
 
-  function cwdVenvPython(): string | null {
-    const venv = join(process.cwd(), ".venv", WIN ? "Scripts" : "bin", WIN ? "python.exe" : "python");
-    if (existsSync(venv)) return venv;
-    return null;
+  function buildRuntime(): CodegraphRuntime {
+    const overrides: ConfigOverrides = {
+      python: flagStr("codegraph-python"),
+      bridgePath: flagStr("codegraph-bridge"),
+      venvDir: flagStr("codegraph-venv"),
+      pythonBase: flagStr("codegraph-python-base"),
+      codegraphSource: flagStr("codegraph-source"),
+      doxygenIndexSource: flagStr("doxygen-index-source"),
+    };
+    return new CodegraphRuntime(resolveConfig(overrides, process.env, process.cwd()));
   }
 
-  function pythonSource(): string {
-    const f = pi.getFlag("codegraph-python");
-    if (typeof f === "string" && f.trim()) return `flag(--codegraph-python)`;
-    if (process.env.CODEGRAPH_PYTHON) return "$CODEGRAPH_PYTHON";
-    if (cwdVenvPython()) return `cwd(.venv)`;
-    const cfg = readConfig().python;
-    if (cfg && cfg.trim()) return `config(${CONFIG_FILE})`;
-    if (venvExists()) return `venv(${venvPython()})`;
-    return "python3 (fallback)";
+  let runtime: CodegraphRuntime = buildRuntime();
+
+  async function ensureBridge() {
+    return runtime.ensureBridge();
   }
 
-  function resolvePython(): string {
-    // 1. Explicit flag
-    const f = pi.getFlag("codegraph-python");
-    if (typeof f === "string" && f.trim()) return f;
-    // 2. Environment variable
-    if (process.env.CODEGRAPH_PYTHON) return process.env.CODEGRAPH_PYTHON;
-    // 3. Project-local venv (auto-detect from CWD)
-    const cwdVenv = cwdVenvPython();
-    if (cwdVenv) return cwdVenv;
-    // 4. Persisted config
-    const cfg = readConfig().python;
-    if (cfg && cfg.trim()) return cfg;
-    // 5. Bootstrapped venv
-    if (venvExists()) return venvPython();
-    // 6. System fallback
-    return "python3";
-  }
-
-  /** Load env vars from a .env file (simple KEY=VALUE parser, no shell expansion). */
-  function loadEnvFile(path: string): Record<string, string> {
-    const vars: Record<string, string> = {};
-    try {
-      const content = readFileSync(path, "utf8");
-      for (const line of content.split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#")) continue;
-        const eq = trimmed.indexOf("=");
-        if (eq < 0) continue;
-        const key = trimmed.slice(0, eq).trim();
-        let val = trimmed.slice(eq + 1).trim();
-        // Strip surrounding quotes
-        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-          val = val.slice(1, -1);
-        }
-        vars[key] = val;
-      }
-    } catch { /* .env not found or unreadable — no-op */ }
-    return vars;
-  }
-  function resolveBridgePath(): string {
-    const f = pi.getFlag("codegraph-bridge");
-    if (typeof f === "string" && f.trim()) return f;
-    return DEFAULT_BRIDGE;
-  }
-  function resolveBasePython(): string {
-    const f = pi.getFlag("codegraph-python-base");
-    if (typeof f === "string" && f.trim()) return f;
-    return process.env.CODEGRAPH_PYTHON_BASE || "python3";
-  }
-  function resolveSource(flagName: string, fallback: string): string {
-    const f = pi.getFlag(flagName);
-    return (typeof f === "string" && f.trim()) ? f : fallback;
-  }
-
-  let bridge: CodegraphBridge | null = null;
-
-  async function ensureBridge(): Promise<CodegraphBridge> {
-    if (bridge && bridge.isRunning()) return bridge;
-    if (!bridge) {
-      // Load .env from project directory before spawning the bridge.
-      // The bridge inherits process.env; we merge .env vars so the backend
-      // (CODEGRAPH_BACKEND / SQLITE_PATH / NEO4J_*) and other project config
-      // are available.
-      const projectEnv = loadEnvFile(join(process.cwd(), ".env"));
-      bridge = new CodegraphBridge(resolvePython(), resolveBridgePath(), projectEnv);
-    }
-    await bridge.start();
-    return bridge;
-  }
-
-  // ── bootstrap_env: auto-provision a venv ─────────────────────────────────
-  function pipSpec(flagName: string, fallback: string): string[] {
-    const s = resolveSource(flagName, fallback);
-    if (existsSync(s)) return ["-e", s];
-    return [s];
-  }
-
-  async function bootstrapEnv(params: Record<string, unknown>): Promise<ReturnType<typeof ok> | ReturnType<typeof err>> {
-    const dir = venvDir();
-    const pyExe = venvPython();
-    const pipExe = venvBin("pip");
-    const base = resolveBasePython();
-    const steps: Array<Record<string, unknown>> = [];
-    const codegraphSpec = (params.codegraph_source as string | undefined)
-      ?? resolveSource("codegraph-source", "codegraph");
-    const doxySpec = (params.doxygen_index_source as string | undefined)
-      ?? resolveSource("doxygen-index-source", "doxygen-index");
-    const cgArgs = existsSync(codegraphSpec) ? ["-e", codegraphSpec] : [codegraphSpec];
-    const dxArgs = existsSync(doxySpec) ? ["-e", doxySpec] : [doxySpec];
-
-    if (!venvExists()) {
-      const r = await pi.exec(base, ["-m", "venv", "--upgrade-deps", dir],
-        { timeout: 180_000 });
-      steps.push({ step: "venv_create", exit_code: r.code, killed: r.killed, stderr: tail(r.stderr) });
-      if (r.code !== 0) {
-        return err(`Failed to create venv at ${dir} (using ${base}): ${r.stderr || 'exit ' + r.code}`,
-          { venv_path: dir, steps });
-      }
-    } else {
-      steps.push({ step: "venv_create", skipped: true, venv_path: dir });
-    }
-
-    const installArgs = ["install", "-U", ...cgArgs, ...dxArgs];
-    const r2 = await pi.exec(pipExe, installArgs, { timeout: SETUP_TIMEOUT_MS });
-    steps.push({ step: "pip_install", exit_code: r2.code, killed: r2.killed,
-      stdout: tail(r2.stdout), stderr: tail(r2.stderr) });
-    if (r2.code !== 0) {
-      return err(`pip install failed (exit ${r2.code}): ${tail(r2.stderr) || tail(r2.stdout)}`,
-        { venv_path: dir, steps, install_args: installArgs });
-    }
-
-    const r3 = await pi.exec(pyExe,
-      ["-c", "import codegraph, doxygen_index; print(getattr(codegraph,'__version__','?'))"],
-      { timeout: 30_000 });
-    const verified = r3.code === 0;
-    steps.push({ step: "verify_import", exit_code: r3.code, stdout: tail(r3.stdout), stderr: tail(r3.stderr) });
-
-    await bridge?.stop().catch(() => {});
-    bridge = null;
-
-    const version = (r3.stdout || "").trim() || "unknown";
-    const msg = `Bootstrapped codegraph venv at ${dir} (python ${pyExe}) — codegraph ${version}, import ${verified ? "OK" : "FAILED"}`;
-    return ok(msg, { venv_path: dir, python: pyExe, codegraph_version: version, verified, steps });
+  /** Adapter: runtime.bootstrapEnv (ToolResult) → Pi message shape. */
+  async function bootstrapEnv(params: Record<string, unknown>) {
+    const r = await runtime.bootstrapEnv(params);
+    return r.ok ? ok(r.text, r.details) : err(r.text, r.details);
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────────────
   pi.on("session_start", () => {
-    const prev = bridge;
-    const projectEnv = loadEnvFile(join(process.cwd(), ".env"));
-    bridge = new CodegraphBridge(resolvePython(), resolveBridgePath(), projectEnv);
-    void prev?.stop().catch(() => {});
+    const prev = runtime;
+    runtime = buildRuntime();
+    void prev.stopBridge().catch(() => {});
     steerUsedCodegraph = false;
     steerBlockedPaths.clear();
     steerBlockCount = 0;
   });
 
   pi.on("session_shutdown", () => {
-    const b = bridge;
-    bridge = null;
-    void b?.stop().catch(() => {});
+    void runtime.stopBridge().catch(() => {});
   });
 
   // ── Read steering ────────────────────────────────────────────────────────
@@ -327,8 +177,9 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
       const rest = parts.slice(1).join(" ");
 
       if (sub === "venv") {
-        console.log(`codegraph venv: ${venvDir()} (${venvExists() ? "present" : "missing"})`);
-        console.log(`  python: ${venvPython()}`);
+        const info = runtime.venvInfo();
+        console.log(`codegraph venv: ${info.dir} (${info.present ? "present" : "missing"})`);
+        console.log(`  python: ${info.python}`);
         return;
       }
       if (sub === "bootstrap") {
@@ -337,17 +188,14 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
         if (parts[2]) p.doxygen_index_source = parts[2];
         const r = await bootstrapEnv(p);
         const line = r.content[0]?.text ?? "";
-        const isError = "isError" in r && r.isError === true;
+        const isError = r.isError === true;
         if (ctx.hasUI) ctx.ui.notify(line, isError ? "error" : "info");
         else console.log(line);
         return;
       }
       if (sub === "restart") {
-        const prev = bridge;
-        bridge = new CodegraphBridge(resolvePython(), resolveBridgePath());
-        await prev?.stop().catch(() => {});
         try {
-          await ensureBridge();
+          await runtime.restartBridge();
           if (ctx.hasUI) ctx.ui.notify("codegraph bridge restarted", "info");
           else console.log("codegraph bridge restarted");
         } catch (e) {
@@ -359,9 +207,9 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
       }
       if (sub === "python") {
         if (parts[1] === "--clear" || parts[1] === "-c") {
-          writeConfig({ python: undefined as unknown as string });
+          runtime.clearPersistedPython();
           console.log(`codegraph: cleared persisted python (was config file ${CONFIG_FILE})`);
-          console.log(`  now: ${resolvePython()}  (source: ${pythonSource()})`);
+          console.log(`  now: ${runtime.config.python}  (source: ${runtime.config.pythonSource})`);
           return;
         }
         const p = parts.slice(1).join("").trim();
@@ -370,32 +218,32 @@ export default function codegraphExtension(pi: ExtensionAPI): void {
             console.error(`codegraph python: not found — ${p}`);
             return;
           }
-          writeConfig({ python: p });
+          runtime.persistPython(p);
+          const fresh = buildRuntime();
           console.log(`codegraph: persisted python = ${p}`);
           console.log(`  config: ${CONFIG_FILE}`);
-          console.log(`  resolved: ${resolvePython()}  (source: ${pythonSource()})`);
+          console.log(`  resolved: ${fresh.config.python}  (source: ${fresh.config.pythonSource})`);
           console.log(`  (restart pi, or /codegraph restart, to relaunch the bridge under it)`);
           return;
         }
-        const cfg = readConfig().python;
-        console.log(`codegraph python: ${resolvePython()}`);
-        console.log(`  source: ${pythonSource()}`);
+        console.log(`codegraph python: ${runtime.config.python}`);
+        console.log(`  source: ${runtime.config.pythonSource}`);
+        const cfg = runtime.persistedPython();
         if (cfg && cfg.trim()) console.log(`  config: ${cfg}  (${CONFIG_FILE})`);
         else console.log(`  config: (not set — run: /codegraph python <path> to persist)`);
         return;
       }
       if (sub === "bridge") {
-        console.log(`codegraph bridge: ${resolveBridgePath()}`);
+        console.log(`codegraph bridge: ${runtime.config.bridgePath}`);
         return;
       }
       void rest;
       try {
-        const b = await ensureBridge();
-        const res = await b.call("ping", {}, 15_000);
+        const res = await runtime.ping();
         if (res.ok) {
           const ping = res.result as { ok?: boolean; version?: string; error?: string } | undefined;
           const line = ping?.ok
-            ? `codegraph: ready (version ${ping.version ?? "?"}, python ${resolvePython()})`
+            ? `codegraph: ready (version ${ping.version ?? "?"}, python ${runtime.config.python})`
             : `codegraph: bridge up but codegraph unavailable: ${ping?.error ?? "?"}`;
           if (ctx.hasUI) ctx.ui.notify(line, ping?.ok ? "info" : "warning");
           else console.log(line);

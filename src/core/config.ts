@@ -28,14 +28,15 @@ export const WIN = platform() === "win32";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
- * Walk up from the module directory to the package root (the first
- * directory containing package.json).  Works from both the source layout
- * (src/core/config.ts) and the bundled layout (dist/codegraph-mcp.js).
+ * Walk up from the module directory to the package/plugin root. Source and
+ * npm-package layouts are identified by package.json; an installed Codex
+ * plugin is identified by .codex-plugin/plugin.json.
  */
 function packageRoot(): string {
   let dir = __dirname;
   for (let i = 0; i < 12; i++) {
-    if (existsSync(join(dir, "package.json"))) return dir;
+    if (existsSync(join(dir, "package.json"))
+        || existsSync(join(dir, ".codex-plugin", "plugin.json"))) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -52,7 +53,14 @@ export function packageVersion(): string {
     const pkg = JSON.parse(readFileSync(join(packageRoot(), "package.json"), "utf8")) as { version?: string };
     return pkg.version ?? "0.0.0";
   } catch {
-    return "0.0.0";
+    try {
+      const manifest = JSON.parse(
+        readFileSync(join(packageRoot(), ".codex-plugin", "plugin.json"), "utf8"),
+      ) as { version?: string };
+      return manifest.version ?? "0.0.0";
+    } catch {
+      return "0.0.0";
+    }
   }
 }
 

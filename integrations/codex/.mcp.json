@@ -1,7 +1,9 @@
 {
   "mcpServers": {
     "codegraph": {
-      "command": "codegraph-mcp"
+      "command": "node",
+      "args": ["./dist/codegraph-mcp.js"],
+      "cwd": "."
     }
   }
 }

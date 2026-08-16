@@ -1,6 +1,6 @@
 {
   "name": "codegraph",
-  "version": "0.1.0",
+  "version": "0.1.0+codex.20260816141704",
   "description": "Codebase knowledge-graph tools for Codex: retrieve code structure and design context, explore symbols and tests, index projects into a local graph, and run decomposition/design pipelines.",
   "author": {
     "name": "Daniel Newman",

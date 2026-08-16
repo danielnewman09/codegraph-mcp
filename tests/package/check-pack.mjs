@@ -7,7 +7,6 @@
  * required file is missing or a forbidden file would be shipped.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -22,6 +21,8 @@ const REQUIRED = [
   "integrations/pi/shared.ts",
   "integrations/pi/pi.ts",
   "integrations/codex/mcp.ts",
+  "integrations/codex/dist/codegraph-mcp.js",
+  "integrations/codex/bridge/codegraph_bridge.py",
   "integrations/codex/.codex-plugin/plugin.json",
   "integrations/codex/.mcp.json",
   "integrations/codex/skills/codegraph/SKILL.md",
@@ -51,7 +52,7 @@ const FORBIDDEN_PATTERNS = [
 ];
 
 export async function runPackCheck(opts = {}) {
-  if (opts.build !== false && !existsSync(join(ROOT, "dist", "codegraph-mcp.js"))) {
+  if (opts.build !== false) {
     execFileSync("npm", ["run", "build"], { cwd: ROOT, stdio: "inherit" });
   }
   const out = execFileSync("npm", ["pack", "--dry-run", "--json"], {

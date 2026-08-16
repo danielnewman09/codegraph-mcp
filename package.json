@@ -36,7 +36,7 @@
   ],
   "scripts": {
     "check": "tsc --noEmit",
-    "build": "esbuild integrations/codex/mcp.ts --bundle --platform=node --format=esm --outfile=dist/codegraph-mcp.js --banner:js=\"#!/usr/bin/env node\"",
+    "build": "node scripts/build.mjs",
     "test": "node --import tsx --test \"tests/core/*.test.ts\" \"tests/mcp/*.test.ts\" \"tests/package/*.test.ts\" \"tests/plugin/*.test.ts\"",
     "test:mcp": "node --import tsx --test \"tests/mcp/*.test.ts\"",
     "test:pi": "tsx stub.test.ts",

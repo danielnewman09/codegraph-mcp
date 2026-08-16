@@ -88,8 +88,8 @@ if (typeof manifest.name !== "string" || !NAME_RE.test(manifest.name)) {
 }
 if (typeof manifest.version !== "string" || !SEMVER_RE.test(manifest.version)) {
   errors.push("plugin.json field `version` must be strict semver");
-} else if (manifest.version !== pkg.version) {
-  errors.push(`plugin.json version ${manifest.version} must match package.json version ${pkg.version}`);
+} else if (manifest.version.split("+", 1)[0] !== pkg.version.split("+", 1)[0]) {
+  errors.push(`plugin.json base version ${manifest.version} must match package.json version ${pkg.version}`);
 }
 requireString(manifest, "description", "");
 

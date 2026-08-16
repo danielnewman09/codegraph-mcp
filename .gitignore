@@ -8,3 +8,5 @@ __pycache__/
 *.sqlite3-wal
 
 dist/
+!integrations/codex/dist/
+!integrations/codex/dist/codegraph-mcp.js

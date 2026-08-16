@@ -28,13 +28,12 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { CodegraphRuntime } from "../core/runtime.js";
-import { resolveConfig } from "../core/config.js";
+import { packageVersion, resolveConfig } from "../core/config.js";
 import { ALL_TOOLS, findTool, toolInputJsonSchema } from "../core/tool-catalog.js";
 import { validateAgainstSchema } from "../core/validate.js";
 import type { JsonObject } from "../core/types.js";
 
-const require = createRequire(import.meta.url);
-const PKG_VERSION: string = (require("../../package.json") as { version?: string }).version ?? "0.0.0";
+const PKG_VERSION: string = packageVersion();
 
 /**
  * Start the MCP stdio server, optionally with an injected runtime (for
@@ -94,9 +93,12 @@ export async function runMcpServer(runtime?: CodegraphRuntime): Promise<void> {
   await server.connect(transport);
 }
 
+const require = createRequire(import.meta.url);
+const requireResolve = require.resolve.bind(require);
+
 // Direct execution: `node dist/codex-mcp.js` or `tsx src/harnesses/mcp.ts`
 const isEntry = process.argv[1] != null
-  && fileURLToPath(import.meta.url) === fileURLToPath(pathToFileURL(require.resolve(process.argv[1])));
+  && fileURLToPath(import.meta.url) === fileURLToPath(pathToFileURL(requireResolve(process.argv[1])));
 if (isEntry) {
   runMcpServer().catch((e) => {
     process.stderr.write(`[codegraph-mcp] fatal: ${e instanceof Error ? e.message : String(e)}\n`);

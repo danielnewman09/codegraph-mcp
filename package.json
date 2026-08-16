@@ -15,6 +15,9 @@
     "retrieval"
   ],
   "main": "index.ts",
+  "bin": {
+    "codegraph-mcp": "./dist/codex-mcp.js"
+  },
   "pi": {
     "extensions": [
       "./index.ts"
@@ -24,14 +27,25 @@
     "index.ts",
     "shared.ts",
     "tools",
+    "src",
     "bridge",
+    "dist",
+    ".codex-plugin",
+    ".mcp.json",
+    "skills",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "!**/__pycache__/**",
+    "!**/*.pyc"
   ],
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "node --import tsx --test \"tests/core/*.test.ts\" \"tests/mcp/*.test.ts\"",
-    "bridge:check": "python3 -c \"import ast; ast.parse(open('bridge/codegraph_bridge.py').read()); print('bridge syntax OK')\""
+    "build": "esbuild src/harnesses/mcp.ts --bundle --platform=node --format=esm --outfile=dist/codex-mcp.js --banner:js=\"#!/usr/bin/env node\"",
+    "test": "node --import tsx --test \"tests/core/*.test.ts\" \"tests/mcp/*.test.ts\" \"tests/package/*.test.ts\"",
+    "test:mcp": "node --import tsx --test \"tests/mcp/*.test.ts\"",
+    "test:pi": "tsx stub.test.ts",
+    "bridge:check": "python3 -c \"import ast; ast.parse(open('bridge/codegraph_bridge.py').read()); print('bridge syntax OK')\"",
+    "pack:check": "npm run build && node tests/package/check-pack.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.74.0",
@@ -45,6 +59,7 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.74.0",
     "@types/node": "^20.0.0",
+    "esbuild": "^0.28.2",
     "tsx": "^4.21.0",
     "typescript": "^5.0.0"
   }

@@ -27,10 +27,34 @@ export const WIN = platform() === "win32";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-/** Bundled bridge script, resolved relative to the module root. */
-export const DEFAULT_BRIDGE = join(
-  __dirname, "..", "..", "bridge", "codegraph_bridge.py",
-);
+/**
+ * Walk up from the module directory to the package root (the first
+ * directory containing package.json).  Works from both the source layout
+ * (src/core/config.ts) and the bundled layout (dist/codex-mcp.js).
+ */
+function packageRoot(): string {
+  let dir = __dirname;
+  for (let i = 0; i < 12; i++) {
+    if (existsSync(join(dir, "package.json"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return __dirname;
+}
+
+/** Bundled bridge script, resolved relative to the package root. */
+export const DEFAULT_BRIDGE = join(packageRoot(), "bridge", "codegraph_bridge.py");
+
+/** Package version from the nearest package.json (works in source + dist). */
+export function packageVersion(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(join(packageRoot(), "package.json"), "utf8")) as { version?: string };
+    return pkg.version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
 
 // ── Timeouts (kept here so shared.ts can re-export them unchanged) ────────
 
